@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trang chủ - BusDN</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .hero-section {
+            background: linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5)), url('https://images.unsplash.com/photo-1570125909232-eb263c188f7e?ixlib=rb-1.2.1&auto=format&fit=crop&w=1950&q=80');
+            background-size: cover;
+            background-position: center;
+            height: 400px;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+        .search-box {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            width: 80%;
+            max-width: 800px;
+        }
+    </style>
+</head>
+<body>
+
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="#"><i class="fas fa-bus"></i> BusDN</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto align-items-center">
+                    <li class="nav-item"><a class="nav-link active" href="#">Trang chủ</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#">Tra cứu Tuyến</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#">Vé của tôi</a></li>
+                    
+                    <li class="nav-item dropdown ms-3">
+                        <a class="nav-link dropdown-toggle d-flex align-items-center bg-white text-dark rounded px-3" href="#" role="button" data-bs-toggle="dropdown">
+                            <img src="<%= user.avatar || '/images/default.png' %>" class="rounded-circle me-2" width="25" height="25" style="object-fit: cover;">
+                            <span><%= user.fullName %></span>
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="/profile">Hồ sơ cá nhân</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item text-danger" href="/logout">Đăng xuất</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="hero-section">
+        <h1 class="mb-4 fw-bold">Vi vu Đà Nẵng cùng BusDN</h1>
+        <div class="search-box text-dark">
+            <form class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label fw-bold"><i class="fas fa-map-marker-alt text-primary"></i> Điểm đi</label>
+                    <input type="text" class="form-control" placeholder="Nhập điểm xuất phát...">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-bold"><i class="fas fa-map-pin text-danger"></i> Điểm đến</label>
+                    <input type="text" class="form-control" placeholder="Nhập nơi muốn đến...">
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <button type="button" class="btn btn-primary w-100 py-2 fw-bold" onclick="alert('Demo: Chức năng tìm đường đang phát triển trên App!')">
+                        <i class="fas fa-search"></i> TÌM TUYẾN XE
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="container my-5">
+        <h3 class="mb-4 border-start border-4 border-primary ps-3">Tin tức & Khuyến mãi</h3>
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card h-100 shadow-sm">
+                    <img src="https://image.thanhnien.vn/w1024/Uploaded/2021/wpxlcqjw/2021_04_27/xe-buyt-da-nang-quang-nam_dlao.jpg" class="card-img-top" alt="...">
+                    <div class="card-body">
+                        <h5 class="card-title">Mở lại tuyến R16 Đà Nẵng - Quảng Nam</h5>
+                        <p class="card-text text-muted">Sở GTVT Đà Nẵng thông báo khôi phục hoạt động tuyến R16 phục vụ sinh viên Làng Đại học.</p>
+                        <a href="#" class="btn btn-sm btn-outline-primary">Xem chi tiết</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body text-center d-flex flex-column justify-content-center">
+                        <i class="fas fa-ticket-alt fa-3x text-warning mb-3"></i>
+                        <h5 class="card-title">Vé tháng sinh viên giảm 50%</h5>
+                        <p class="card-text">Đăng ký ngay trên ứng dụng BusDN để nhận ưu đãi vé tháng chỉ còn 45.000đ.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body text-center d-flex flex-column justify-content-center">
+                        <i class="fas fa-mobile-alt fa-3x text-success mb-3"></i>
+                        <h5 class="card-title">Tải App BusDN ngay</h5>
+                        <p class="card-text">Theo dõi lộ trình thời gian thực và thanh toán không tiền mặt.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
