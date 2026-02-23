@@ -1,2 +1,1 @@
-admin@busdn.vn |123456
-passenger@busdn.vn
+ADMIN | nguyennhatminhnau@gmail.com | nhatminh

@@ -75,8 +75,6 @@ const seedData = async () => {
         date: new Date(), // Hôm nay
         shiftTime: { start: "06:00", end: "14:00" }
     });
-    //admin@danabus.vn / 123456
-    //taixe@danabus.vn / 123456
     process.exit();
 };
 

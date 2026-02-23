@@ -6,8 +6,9 @@ const multer = require('multer');
 const path = require('path');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
-const nodemailer = require('nodemailer'); // <--- THÊM CÁI NÀY
+const nodemailer = require('nodemailer');
 const app = express();
+
 
 // --- 1. KẾT NỐI MONGODB ---
 mongoose.connect('mongodb+srv://DE181046:nhatminh@busdn.2y1qib0.mongodb.net/?appName=BusDN')
@@ -15,6 +16,23 @@ mongoose.connect('mongodb+srv://DE181046:nhatminh@busdn.2y1qib0.mongodb.net/?app
     .catch(err => console.error("❌ Lỗi kết nối DB:", err));
 
 const { User } = require('./models');
+
+// --- HÀM KIỂM TRA MẬT KHẨU (THEO YÊU CẦU CỦA BẠN) ---
+const checkPassword = (password) => {
+    // 1. Độ dài >= 4
+    if (password.length < 4) return false;
+    // 2. Không chứa dấu cách
+    if (/\s/.test(password)) return false;
+    // 3. Ít nhất 1 chữ hoa
+    if (!/[A-Z]/.test(password)) return false;
+    // 4. Ít nhất 1 chữ số
+    if (!/[0-9]/.test(password)) return false;
+    // 5. Ít nhất 1 ký tự đặc biệt (!@#$%^&*...)
+    if (!/[\W_]/.test(password)) return false;
+
+    return true;
+};
+const PASS_ERR_MSG = "Mật khẩu phải có ít nhất 4 ký tự, 1 chữ hoa, 1 số, 1 ký tự đặc biệt và KHÔNG có khoảng trắng!";
 
 // --- 2. CẤU HÌNH GỬI MAIL (NODEMAILER) ---
 const transporter = nodemailer.createTransport({
@@ -114,10 +132,16 @@ app.get('/auth/google/callback',
     }
 );
 
-// --- 6. XỬ LÝ ĐĂNG KÝ (ĐÃ SỬA LỖI GỬI MAIL) ---
+// --- 6. XỬ LÝ ĐĂNG KÝ (ĐÃ THÊM VALIDATE PASS) ---
 app.post('/register', async (req, res) => {
     try {
         const { email, password } = req.body;
+
+        // --- VALIDATE PASSWORD ---
+        if (!checkPassword(password)) {
+            return res.render('login', { error: PASS_ERR_MSG, success: null });
+        }
+
         const existingUser = await User.findOne({ email });
         if (existingUser) return res.render('login', { error: 'Email đã tồn tại!', success: null });
 
@@ -132,7 +156,6 @@ app.post('/register', async (req, res) => {
         });
         await newUser.save();
 
-        // GỬI MAIL THẬT
         const verifyLink = `http://localhost:3000/verify/${newUser._id}`;
         await sendEmail(email, 'Xác thực tài khoản BusDN',
             `<p>Chào mừng!</p><p>Vui lòng bấm link để xác thực: <a href="${verifyLink}">${verifyLink}</a></p>`
@@ -185,9 +208,16 @@ app.get('/reset-password/:userId', async (req, res) => {
     }
 });
 
+// --- RESET PASSWORD (ĐÃ THÊM VALIDATE PASS) ---
 app.post('/reset-password/:userId', async (req, res) => {
     try {
         const { password, confirmPassword } = req.body;
+
+        // --- VALIDATE PASSWORD ---
+        if (!checkPassword(password)) {
+            return res.render('reset-password', { userId: req.params.userId, error: PASS_ERR_MSG });
+        }
+
         if (password !== confirmPassword) {
             return res.render('reset-password', { userId: req.params.userId, error: 'Mật khẩu không khớp!' });
         }
@@ -208,7 +238,6 @@ const isAdmin = (req, res, next) => {
     else return res.redirect('/profile');
 };
 
-// Hàm render Admin helper (đã tối ưu gọn hơn)
 const renderAdmin = async (req, res, view, title, data = {}) => {
     try {
         const currentUser = await User.findById(req.session.userId);
@@ -259,7 +288,12 @@ app.post('/login', async (req, res) => {
 app.get('/profile', async (req, res) => {
     if (!req.session.userId) return res.redirect('/login');
     const user = await User.findById(req.session.userId);
-    res.render('profile', { user });
+
+    // Lấy thông báo từ URL (nếu có)
+    const error = req.query.error;
+    const success = req.query.success;
+
+    res.render('profile', { user, error, success });
 });
 
 app.post('/upload-avatar', upload.single('avatar'), async (req, res) => {
@@ -273,34 +307,42 @@ app.post('/upload-avatar', upload.single('avatar'), async (req, res) => {
 
 app.post('/edit-profile', async (req, res) => {
     if (!req.session.userId) return res.redirect('/login');
-    await User.findByIdAndUpdate(req.session.userId, { fullName: req.body.fullName });
+    await User.findByIdAndUpdate(req.session.userId, {
+        fullName: req.body.fullName,
+        phone: req.body.phone
+    });
 
     if (req.session.role === 'ADMIN') return res.redirect('/admin/profile');
     if (req.session.role === 'PASSENGER') return res.redirect('/home');
     return res.redirect('/profile');
 });
 
-app.get('/change-password', async (req, res) => {
-    if (!req.session.userId) return res.redirect('/login');
-    const user = await User.findById(req.session.userId);
-    res.render('change-password', { user, error: null, success: null });
-});
-
+// --- CHANGE PASSWORD (ĐÃ THÊM VALIDATE PASS) ---
 app.post('/change-password', async (req, res) => {
     if (!req.session.userId) return res.redirect('/login');
     const { oldPassword, newPassword, confirmPassword } = req.body;
     const user = await User.findById(req.session.userId);
 
-    if (newPassword !== confirmPassword) {
-        return res.render('change-password', { user, error: 'Mật khẩu mới không khớp!', success: null });
-    }
-    if (!(await bcrypt.compare(oldPassword, user.password))) {
-        return res.render('change-password', { user, error: 'Mật khẩu cũ không đúng!', success: null });
+    // --- VALIDATE PASSWORD ---
+    if (!checkPassword(newPassword)) {
+        return res.redirect('/profile?error=' + encodeURIComponent(PASS_ERR_MSG));
     }
 
+    // Kiểm tra mật khẩu mới khớp nhau không
+    if (newPassword !== confirmPassword) {
+        return res.redirect('/profile?error=' + encodeURIComponent('Mật khẩu mới không khớp!'));
+    }
+
+    // Kiểm tra mật khẩu cũ
+    if (!(await bcrypt.compare(oldPassword, user.password))) {
+        return res.redirect('/profile?error=' + encodeURIComponent('Mật khẩu cũ không đúng!'));
+    }
+
+    // Đổi mật khẩu thành công
     const hashedPassword = await bcrypt.hash(newPassword, await bcrypt.genSalt(10));
     await User.findByIdAndUpdate(req.session.userId, { password: hashedPassword });
-    res.render('change-password', { user, error: null, success: 'Đổi mật khẩu thành công!' });
+
+    return res.redirect('/profile?success=' + encodeURIComponent('Đổi mật khẩu thành công!'));
 });
 
 app.get('/logout', (req, res) => {

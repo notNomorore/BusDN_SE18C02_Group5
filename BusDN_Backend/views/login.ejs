@@ -3,69 +3,238 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>BusDN Auth</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đăng nhập - BusDN Admin</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        body,
+        html {
+            height: 100%;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+        }
+
+        .bg-image {
+            background-image: url('/images/bus-bg.jpg');
+            background-size: cover;
+            background-position: center;
+            position: relative;
+        }
+
+        .bg-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            background: linear-gradient(to bottom, rgba(0, 51, 102, 0.4), rgba(0, 0, 0, 0.9));
+        }
+
+        .bg-image::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            right: 0;
+
+            width: 40%;
+            background: linear-gradient(to right, transparent, #f8f9fa);
+            z-index: 2;
+
+            pointer-events: none;
+
+        }
+
+        .slogan-container {
+            position: absolute;
+            bottom: 10%;
+            left: 0;
+            padding: 3rem;
+            color: white;
+            z-index: 3;
+            text-shadow: 2px 2px 10px rgba(0, 0, 0, 0.9);
+        }
+
+        .slogan-title {
+            font-size: 3.5rem;
+            font-weight: 800;
+            margin-bottom: 0.5rem;
+        }
+
+        .slogan-subtitle {
+            font-size: 1.3rem;
+            font-weight: 400;
+            opacity: 0.9;
+        }
+
+        .login-section {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #f8f9fa;
+            position: relative;
+            z-index: 2;
+        }
+
+        .login-card {
+            width: 100%;
+            max-width: 450px;
+            background-color: #003366;
+            color: white;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+        }
+
+        .app-logo {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            color: #ffcc00;
+        }
+
+        .form-control {
+            height: 50px;
+            font-size: 16px;
+            border-radius: 8px;
+            border: none;
+        }
+
+        .btn-login {
+            background-color: #28a745;
+            border: none;
+            height: 50px;
+            font-size: 18px;
+            font-weight: bold;
+            width: 100%;
+            border-radius: 8px;
+            color: white;
+            margin-top: 10px;
+        }
+
+        .btn-login:hover {
+            background-color: #218838;
+        }
+
+        .btn-google {
+            background-color: white;
+            color: #333;
+            height: 50px;
+            width: 100%;
+            border-radius: 8px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 15px;
+            transition: all 0.3s;
+        }
+
+        .btn-google:hover {
+            background-color: #e9ecef;
+        }
+
+        .btn-google i {
+            margin-right: 10px;
+            color: #db4437;
+        }
+
+        .forgot-link,
+        .register-link {
+            color: #adb5bd;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+
+        .forgot-link:hover,
+        .register-link:hover {
+            color: white;
+            text-decoration: underline;
+        }
+
+        .divider {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            margin: 20px 0;
+        }
+    </style>
 </head>
 
-<body class="bg-light">
-    <div class="container mt-5" style="max-width: 400px;">
-        <h3 class="text-center text-primary mb-4">BusDN System</h3>
+<body>
 
-        <% if(error) { %>
-            <div class="alert alert-danger">
-                <%= error %>
+    <div class="container-fluid h-100">
+        <div class="row h-100">
+
+            <div class="col-lg-7 p-0 d-none d-lg-block bg-image">
+                <div class="bg-overlay"></div>
+
+                <div class="slogan-container">
+                    <h1 class="slogan-title">BusDN Management</h1>
+                    <p class="slogan-subtitle">Hệ thống quản lý vận tải hành khách công cộng thông minh.</p>
+                </div>
             </div>
-            <% } %>
-                <% if(success) { %>
-                    <div class="alert alert-success">
-                        <%= success %>
+
+            <div class="col-lg-5 login-section">
+
+                <div class="login-card">
+                    <div class="text-center mb-4">
+                        <i class="fa-solid fa-bus-simple app-logo"></i>
+                        <h2 class="fw-bold">Đăng Nhập</h2>
+                        <p class="text-white-50">Cổng thông tin quản trị viên</p>
                     </div>
-                    <% } %>
 
-                        <div class="card p-4 shadow-sm">
-                            <form action="/login" method="POST" id="loginForm">
-                                <h5 class="mb-3">Đăng Nhập</h5>
-                                <input type="email" name="email" class="form-control mb-2" placeholder="Email" required>
-                                <input type="password" name="password" class="form-control mb-2" placeholder="Mật khẩu"
-                                    required>
-                                <button type="submit" class="btn btn-primary w-100">Đăng nhập</button>
-                                <a href="/auth/google" class="btn btn-outline-danger w-100 mt-2">
-                                    <i class="fab fa-google"></i> Đăng nhập Google
-                                </a>
-                            </form>
-
-                            <hr>
-
-                            <form action="/register" method="POST" id="registerForm" style="display:none;">
-                                <h5 class="mb-3 text-success">Đăng Ký Mới</h5>
-                                <input type="email" name="email" class="form-control mb-2" placeholder="Nhập Email"
-                                    required>
-                                <input type="password" name="password" class="form-control mb-2"
-                                    placeholder="Nhập Mật khẩu" required>
-                                <button type="submit" class="btn btn-success w-100">Đăng Ký</button>
-                            </form>
-
-                            <div class="text-center mt-3">
-                                <a href="#" onclick="toggleForm()" class="me-3">Chuyển đổi Đăng nhập / Đăng ký</a>
-                            </div>
-                            <a href="/forgot-password" class="text-center mt-3 text-danger small">Quên mật khẩu ?</a>
+                    <% if (error) { %>
+                        <div class="alert alert-danger p-2 text-center text-danger bg-white mb-3">
+                            <%= error %>
                         </div>
-                        
-    </div>
-    </div>
+                        <% } %>
+                            <% if (success) { %>
+                                <div class="alert alert-success p-2 text-center text-success bg-white mb-3">
+                                    <%= success %>
+                                </div>
+                                <% } %>
+
+                                    <form action="/login" method="POST">
+                                        <div class="mb-3">
+                                            <label class="form-label">Email</label>
+                                            <input type="email" name="email" class="form-control"
+                                                placeholder="nhanvien@busdn.com" required>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">Mật khẩu</label>
+                                            <input type="password" name="password" class="form-control"
+                                                placeholder="••••••••" required>
+                                        </div>
+
+                                        <div class="d-flex justify-content-between align-items-center mb-4">
+                                            <div class="form-check">
+                                                <input type="checkbox" class="form-check-input" id="remember">
+                                                <label class="form-check-label text-white-50" for="remember">Ghi
+                                                    nhớ</label>
+                                            </div>
+                                            <a href="/forgot-password" class="forgot-link">Quên mật khẩu?</a>
+                                        </div>
+
+                                        <button type="submit" class="btn btn-login">ĐĂNG NHẬP</button>
+                                    </form>
+
+                                    <div class="divider"></div>
+
+                                    <a href="/auth/google" class="btn btn-google">
+                                        <i class="fa-brands fa-google"></i> Đăng nhập bằng Gmail
+                                    </a>
+
+                                    <div class="text-center mt-4">
+                                        <span class="text-white-50">Chưa có tài khoản? </span>
+                                        <a href="/register" class="register-link fw-bold">Đăng ký ngay</a>
+                                    </div>
+                </div>
+
+            </div>
+        </div>
     </div>
 
-    <script>
-        function toggleForm() {
-            var login = document.getElementById('loginForm');
-            var reg = document.getElementById('registerForm');
-            if (login.style.display === 'none') {
-                login.style.display = 'block'; reg.style.display = 'none';
-            } else {
-                login.style.display = 'none'; reg.style.display = 'block';
-            }
-        }
-    </script>
 </body>
 
 </html>
