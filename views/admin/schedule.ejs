@@ -1,0 +1,189 @@
+<%
+const schedList = Array.isArray(schedules) ? schedules : [];
+const safe = v => v || '';
+const fmtShift = s => (s && s.shiftTime && s.shiftTime.start && s.shiftTime.end) ? `${s.shiftTime.start} - ${s.shiftTime.end}` : '-';
+const fmtDateLocal = d => d ? new Date(d).toISOString().slice(0,10) : '';
+const statusBadgeClass = s => {
+    const now = new Date();
+    const schDate = new Date(s.date);
+    schDate.setHours(0,0,0,0);
+    const today = new Date(); today.setHours(0,0,0,0);
+    if (!s.date) return 'bg-secondary';
+    if (schDate < today) return 'bg-secondary';
+    if (schDate > today) return 'bg-secondary';
+    if (s.shiftTime && s.shiftTime.start && s.shiftTime.end) {
+        const start = new Date(`${fmtDateLocal(s.date)}T${s.shiftTime.start}`);
+        const end = new Date(`${fmtDateLocal(s.date)}T${s.shiftTime.end}`);
+        if (now < start) return 'bg-secondary';
+        if (now > end) return 'bg-success';
+        return 'bg-warning text-dark';
+    }
+    return 'bg-secondary';
+};
+const statusText = s => {
+    const now = new Date();
+    const schDate = new Date(s.date);
+    schDate.setHours(0,0,0,0);
+    const today = new Date(); today.setHours(0,0,0,0);
+    if (!s.date) return '-';
+    if (schDate < today) return 'Đã qua';
+    if (schDate > today) return 'Chưa tới';
+    if (s.shiftTime && s.shiftTime.start && s.shiftTime.end) {
+        const start = new Date(`${fmtDateLocal(s.date)}T${s.shiftTime.start}`);
+        const end = new Date(`${fmtDateLocal(s.date)}T${s.shiftTime.end}`);
+        if (now < start) return 'Chưa bắt đầu';
+        if (now > end) return 'Hoàn thành';
+        return 'Đang chạy';
+    }
+    return '-';
+};
+%>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Điều phối &amp; Phân công (Scheduling)</h2>
+    <div>
+        <input id="filterDate" type="date" class="form-control d-inline-block w-auto" value="<%= selectedDate || '' %>">
+        <button id="btnOpenCreateScheduleModal" class="btn btn-primary ms-2" onclick="openCreateScheduleModal(event)"><i class="fas fa-plus"></i> Tạo Lịch Mới</button>
+    </div>
+</div>
+
+<% if (success) { %>
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+    <%= success %>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+<% } %>
+<% if (error) { %>
+<div class="alert alert-danger alert-dismissible fade show" role="alert">
+    <%= error %>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+<% } %>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <table class="table table-bordered">
+            <thead class="table-light text-center">
+                <tr>
+                    <th>Ca làm việc</th>
+                    <th>Tuyến</th>
+                    <th>Xe (Biển số)</th>
+                    <th>Tài xế chính</th>
+                    <th>Phụ xe</th>
+                    <th>Trạng thái</th>
+                    <th>Tác vụ</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% if (!schedList.length) { %>
+                <tr>
+                    <td colspan="7" class="text-center text-muted py-4">Chưa có lịch nào cho ngày này.</td>
+                </tr>
+                <% } %>
+                <% schedList.forEach(s => { %>
+                <tr>
+                    <td class="text-center align-middle"><strong><%= fmtShift(s) %></strong></td>
+                    <td class="align-middle text-center">
+                        <span class="badge bg-primary"><%= s.routeId ? safe(s.routeId.routeNumber) : '-' %></span>
+                    </td>
+                    <td class="align-middle">
+                        <% if (s.busId) { %>
+                        <strong><%= safe(s.busId.licensePlate) %></strong><br><small><%= safe(s.busId.brand) %></small>
+                        <% } else { %>
+                        <span class="text-muted">Chưa gán</span>
+                        <% } %>
+                    </td>
+                    <td class="align-middle">
+                        <% if (s.driverId) { %>
+                        <img src="https://ui-avatars.com/api/?name=<%= encodeURIComponent(s.driverId.fullName) %>" class="rounded-circle" width="30"> 
+                        <%= safe(s.driverId.fullName) %>
+                        <% } else { %>
+                        <span class="text-danger">Chưa phân công</span>
+                        <% } %>
+                    </td>
+                    <td class="align-middle">-</td>
+                    <td class="align-middle text-center">
+                        <span class="badge <%= statusBadgeClass(s) %>"><%= statusText(s) %></span>
+                    </td>
+                    <td class="align-middle text-center">
+                        <button class="btn btn-sm btn-link">Chi tiết</button>
+                    </td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- create schedule modal -->
+<div class="modal fade" id="createScheduleModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form action="/admin/schedules/create" method="POST">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-plus me-2"></i>Tạo Lịch Mới</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Ngày <span class="text-danger">*</span></label>
+                            <input type="date" name="date" class="form-control" required value="<%= selectedDate || '' %>">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Tuyến <span class="text-danger">*</span></label>
+                            <select name="routeId" class="form-select" required>
+                                <option value="">-- Chọn tuyến --</option>
+                                <% (routes || []).forEach(r => { %>
+                                <option value="<%= r._id %>"><%= r.routeNumber %> - <%= r.name %></option>
+                                <% }) %>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Xe <span class="text-danger">*</span></label>
+                            <select name="busId" class="form-select" required>
+                                <option value="">-- Chọn xe --</option>
+                                <% (buses || []).forEach(b => { %>
+                                <option value="<%= b._id %>"><%= b.licensePlate %> (<%= b.brand %>)</option>
+                                <% }) %>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Tài xế <span class="text-danger">*</span></label>
+                            <select name="driverId" class="form-select" required>
+                                <option value="">-- Chọn tài xế --</option>
+                                <% (drivers || []).forEach(d => { %>
+                                <option value="<%= d._id %>"><%= d.fullName %></option>
+                                <% }) %>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Giờ bắt đầu <span class="text-danger">*</span></label>
+                            <input type="time" name="startTime" class="form-control" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Giờ kết thúc <span class="text-danger">*</span></label>
+                            <input type="time" name="endTime" class="form-control" required>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+                    <button type="submit" class="btn btn-primary">Tạo lịch</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.getElementById('filterDate').addEventListener('change', function() {
+        window.location.search = '?date=' + this.value;
+    });
+    function openCreateScheduleModal(evt) {
+        const modalEl = document.getElementById('createScheduleModal');
+        const dateInput = modalEl.querySelector('input[name=date]');
+        dateInput.value = document.getElementById('filterDate').value;
+        new bootstrap.Modal(modalEl).show();
+    }
+</script>
