@@ -68,8 +68,24 @@
                     </a>
                 </li>
                 <li>
-                    <a href="#" class="<%= path === 'staff' ? 'active' : '' %>">
-                        <i class="fas fa-users-cog me-2"></i> Nhân sự (Tài xế)
+                    <a href="/admin/staff"
+                        class="<%= ['staff-list','staff-create','priority-profiles'].includes(path) ? 'active' : '' %>">
+                        <i class="fas fa-users-cog me-2"></i> Nhân sự
+                    </a>
+                    <% if (['staff-list','staff-create','priority-profiles'].includes(path)) { %>
+                        <ul class="nav flex-column ms-3" style="font-size:0.88em;">
+                            <li><a href="/admin/staff" class="<%= path === 'staff-list' ? 'active' : '' %>"
+                                    style="padding:5px 10px;">
+                                    <i class="fas fa-list me-1"></i> Danh sách</a></li>
+                            <li><a href="/admin/staff/create" class="<%= path === 'staff-create' ? 'active' : '' %>"
+                                    style="padding:5px 10px;">
+                                    <i class="fas fa-user-plus me-1"></i> Tạo tài khoản</a></li>
+                        </ul>
+                        <% } %>
+                </li>
+                <li>
+                    <a href="/admin/priority-profiles" class="<%= path === 'priority-profiles' ? 'active' : '' %>">
+                        <i class="fas fa-id-card me-2"></i> Hồ sơ ưu tiên
                     </a>
                 </li>
                 <li>

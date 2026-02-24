@@ -12,30 +12,45 @@
             <ul class="navbar-nav mx-auto">
                 <li class="nav-item"><a class="nav-link text-white mx-2" href="/home">Trang chủ</a></li>
                 <li class="nav-item"><a class="nav-link text-white mx-2" href="#">Tra cứu tuyến</a></li>
-                <li class="nav-item"><a class="nav-link text-white mx-2" href="#">Vé của tôi</a></li>
                 <li class="nav-item"><a class="nav-link text-white mx-2" href="#">Tin tức</a></li>
+                <% if (user) { %>
+                    <li class="nav-item"><a class="nav-link text-white mx-2" href="#">Vé của tôi</a></li>
+                <% } %>
             </ul>
 
-            <div class="dropdown">
-                <a href="#" class="d-flex align-items-center text-white text-decoration-none dropdown-toggle"
-                    id="userMenu" data-bs-toggle="dropdown">
-                    <img src="<%= user && user.avatar ? user.avatar : 'https://via.placeholder.com/40' %>"
-                        class="rounded-circle border border-2 border-warning me-2" width="40" height="40"
-                        style="object-fit: cover;">
-                    <span class="fw-bold">
-                        <%= user ? user.fullName : 'Khách' %>
-                    </span>
-                </a>
-                <ul class="dropdown-menu dropdown-menu-end shadow">
-                    <li><a class="dropdown-item" href="/profile"><i class="fa-solid fa-user me-2"></i> Hồ sơ cá nhân</a>
-                    </li>
-                    <li><a class="dropdown-item" href="#"><i class="fa-solid fa-qrcode me-2"></i> Mã vé QR</a></li>
-                    <li>
-                        <hr class="dropdown-divider">
-                    </li>
-                    <li><a class="dropdown-item text-danger" href="/logout"><i
-                                class="fa-solid fa-right-from-bracket me-2"></i> Đăng xuất</a></li>
-                </ul>
+            <div class="d-flex align-items-center">
+                <% if (user) { %>
+                    <div class="dropdown">
+                        <a href="#" class="d-flex align-items-center text-white text-decoration-none dropdown-toggle"
+                            id="userMenu" data-bs-toggle="dropdown">
+                            <img src="<%= user.avatar ? user.avatar : 'https://cdn-icons-png.flaticon.com/512/149/149071.png' %>"
+                                class="rounded-circle border border-2 border-warning me-2" width="40" height="40"
+                                style="object-fit: cover;">
+                            <span class="fw-bold">
+                                <%= user.fullName %>
+                            </span>
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end shadow border-0 mt-2">
+                            <li><h6 class="dropdown-header">Tài khoản cá nhân</h6></li>
+                            <li><a class="dropdown-item" href="/profile"><i class="fa-solid fa-user me-2 text-primary"></i> Hồ sơ cá nhân</a></li>
+                            <li><a class="dropdown-item" href="#"><i class="fa-solid fa-qrcode me-2 text-success"></i> Mã vé QR</a></li>
+                            
+                            <% if (user.role === 'ADMIN') { %>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item" href="/admin/dashboard"><i class="fa-solid fa-user-shield me-2 text-danger"></i> Quản trị hệ thống</a></li>
+                            <% } %>
+
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item text-danger" href="/logout"><i class="fa-solid fa-right-from-bracket me-2"></i> Đăng xuất</a></li>
+                        </ul>
+                    </div>
+                <% } else { %>
+                    <div class="auth-buttons">
+                        <a href="/login" class="btn btn-outline-light me-2 fw-bold shadow-sm">
+                            <i class="fa-solid fa-right-to-bracket me-1"></i> Đăng nhập
+                        </a>
+                    </div>
+                <% } %>
             </div>
         </div>
     </div>
