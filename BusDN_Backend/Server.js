@@ -10,7 +10,7 @@ const nodemailer = require('nodemailer'); // <--- THÊM CÁI NÀY
 const app = express();
 
 // --- 1. KẾT NỐI MONGODB ---
-mongoose.connect('mongodb+srv://DE181046:nhatminh@busdn.2y1qib0.mongodb.net/?appName=BusDN')
+mongoose.connect('secret')
     .then(() => console.log("✅ Đã kết nối MongoDB Atlas"))
     .catch(err => console.error("❌ Lỗi kết nối DB:", err));
 
