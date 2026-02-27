@@ -1,16 +1,42 @@
 <%
 const routeList = Array.isArray(routes) ? routes : [];
+const currentFilters = filters || {};
+const currentQ = currentFilters.q || '';
+const currentStatus = currentFilters.status || '';
 
-const badgeClass = (status) =>
-  ((status || 'ACTIVE') === 'INACTIVE' ? 'bg-secondary' : 'bg-success');
+const normalizeStatus = (status) => {
+  if (status === 'ACTIVE') return 'ACTIVE';
+  if (status === 'INACTIVE') return 'INACTIVE';
+  return 'UNKNOWN';
+};
 
-const badgeText = (status) =>
-  ((status || 'ACTIVE') === 'INACTIVE' ? 'Tạm ngưng' : 'Đang hoạt động');
+const badgeClass = (status) => {
+  const s = normalizeStatus(status);
+  if (s === 'ACTIVE') return 'bg-success';
+  if (s === 'INACTIVE') return 'bg-secondary';
+  return 'bg-warning text-dark';
+};
 
-const codeBadgeClass = (status) =>
-  ((status || 'ACTIVE') === 'INACTIVE' ? 'bg-secondary' : 'bg-primary');
+const badgeText = (status) => {
+  const s = normalizeStatus(status);
+  if (s === 'ACTIVE') return 'Đang hoạt động';
+  if (s === 'INACTIVE') return 'Tạm ngưng';
+  return 'Chưa có trạng thái';
+};
+
+const codeBadgeClass = (status) => {
+  const s = normalizeStatus(status);
+  if (s === 'ACTIVE') return 'bg-primary';
+  if (s === 'INACTIVE') return 'bg-secondary';
+  return 'bg-warning text-dark';
+};
 
 const fmtDistance = (v) => (v || v === 0) ? `${v} km` : '-';
+
+const fmtMoney = (v) => {
+  if (v === null || v === undefined || v === '') return '-';
+  return Number(v).toLocaleString('vi-VN') + ' đ';
+};
 
 const fmtOpTime = (r) => {
   const s = r && r.operationTime && r.operationTime.start ? r.operationTime.start : '';
@@ -20,17 +46,24 @@ const fmtOpTime = (r) => {
 
 const timeValue = (r, key) => (r && r.operationTime && r.operationTime[key]) ? r.operationTime[key] : '';
 const safe = (v) => (v === null || v === undefined) ? '' : v;
+const valueOrDefault = (v, d) => (v === null || v === undefined || v === '') ? d : v;
 %>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2>Quản lý Tuyến xe (Network)</h2>
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <h2 class="mb-0">Quản lý Tuyến xe (Network)</h2>
 
-    <button type="button"
-            class="btn btn-primary"
-            data-bs-toggle="modal"
-            data-bs-target="#createRouteModal">
-        <i class="fas fa-plus"></i> Thêm Tuyến Mới
-    </button>
+    <div class="d-flex gap-2">
+        <a href="/admin/stops" class="btn btn-outline-info">
+            <i class="fas fa-map-marker-alt"></i> Quản lý Trạm dừng
+        </a>
+
+        <button type="button"
+                class="btn btn-primary"
+                data-bs-toggle="modal"
+                data-bs-target="#createRouteModal">
+            <i class="fas fa-plus"></i> Thêm Tuyến Mới
+        </button>
+    </div>
 </div>
 
 <% if (success) { %>
@@ -47,6 +80,45 @@ const safe = (v) => (v === null || v === undefined) ? '' : v;
 </div>
 <% } %>
 
+<div class="card shadow-sm mb-3">
+    <div class="card-body">
+        <form method="GET" action="/admin/routes">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-6">
+                    <label class="form-label">Tìm tuyến</label>
+                    <input type="text"
+                           name="q"
+                           class="form-control"
+                           placeholder="Nhập mã tuyến, tên tuyến hoặc mô tả..."
+                           value="<%= currentQ %>">
+                </div>
+
+                <div class="col-md-3">
+                    <label class="form-label">Trạng thái</label>
+                    <select name="status" class="form-select">
+                        <option value="">Tất cả</option>
+                        <option value="ACTIVE" <%= currentStatus === 'ACTIVE' ? 'selected' : '' %>>
+                            Đang hoạt động
+                        </option>
+                        <option value="INACTIVE" <%= currentStatus === 'INACTIVE' ? 'selected' : '' %>>
+                            Tạm ngưng
+                        </option>
+                    </select>
+                </div>
+
+                <div class="col-md-3 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fas fa-search"></i> Lọc
+                    </button>
+                    <a href="/admin/routes" class="btn btn-light border w-100">
+                        Đặt lại
+                    </a>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
 <div class="card shadow-sm">
     <div class="card-body">
         <div class="table-responsive">
@@ -57,6 +129,7 @@ const safe = (v) => (v === null || v === undefined) ? '' : v;
                         <th>Tên tuyến</th>
                         <th>Cự ly</th>
                         <th>Giờ hoạt động</th>
+                        <th>Giá vé tháng</th>
                         <th>Trạng thái</th>
                         <th>Hành động</th>
                     </tr>
@@ -64,7 +137,7 @@ const safe = (v) => (v === null || v === undefined) ? '' : v;
                 <tbody>
                     <% if (!routeList.length) { %>
                     <tr>
-                        <td colspan="6" class="text-center text-muted py-4">
+                        <td colspan="7" class="text-center text-muted py-4">
                             Chưa có tuyến nào trong hệ thống.
                         </td>
                     </tr>
@@ -82,12 +155,13 @@ const safe = (v) => (v === null || v === undefined) ? '' : v;
                             <strong><%= safe(route.name) %></strong>
                             <% if (route.description) { %>
                                 <br>
-                                <small class="text-muted">Qua: <%= route.description %></small>
+                                <small class="text-muted"><%= route.description %></small>
                             <% } %>
                         </td>
 
                         <td><%= fmtDistance(route.distance) %></td>
                         <td><%= fmtOpTime(route) %></td>
+                        <td><%= fmtMoney(route.monthlyPassPrice) %></td>
 
                         <td>
                             <span class="badge <%= badgeClass(route.status) %>">
@@ -95,7 +169,16 @@ const safe = (v) => (v === null || v === undefined) ? '' : v;
                             </span>
                         </td>
 
-                        <td>
+                        <td class="text-nowrap">
+                            <!-- Nút xem chi tiết -->
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-info"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#detailRouteModal-<%= idx %>"
+                                    title="Xem chi tiết">
+                                <i class="fas fa-eye"></i>
+                            </button>
+
                             <!-- Nút sửa -->
                             <button type="button"
                                     class="btn btn-sm btn-outline-primary"
@@ -106,7 +189,7 @@ const safe = (v) => (v === null || v === undefined) ? '' : v;
                             </button>
 
                             <!-- ACTIVE => cho tạm ngưng -->
-                            <% if ((route.status || 'ACTIVE') === 'ACTIVE') { %>
+                            <% if (route.status === 'ACTIVE') { %>
                             <form action="/admin/routes/<%= route._id %>/deactivate"
                                   method="POST"
                                   class="d-inline js-confirm-form"
@@ -118,10 +201,10 @@ const safe = (v) => (v === null || v === undefined) ? '' : v;
                                 <button type="submit"
                                         class="btn btn-sm btn-outline-danger"
                                         title="Tạm ngưng">
-                                    <i class="fas fa-trash"></i>
+                                    <i class="fas fa-ban"></i>
                                 </button>
                             </form>
-                            <% } else { %>
+                            <% } else if (route.status === 'INACTIVE') { %>
                             <!-- INACTIVE => cho kích hoạt lại -->
                             <form action="/admin/routes/<%= route._id %>/activate"
                                   method="POST"
@@ -137,14 +220,14 @@ const safe = (v) => (v === null || v === undefined) ? '' : v;
                                     <i class="fas fa-rotate-left"></i>
                                 </button>
                             </form>
-                            <% } %>
-
-                            <!-- Nút xem trạm dừng (placeholder cho giống UI) -->
+                            <% } else { %>
                             <button type="button"
-                                    class="btn btn-sm btn-outline-info"
-                                    title="Xem trạm dừng (chưa triển khai)">
-                                <i class="fas fa-map-marker-alt"></i>
+                                    class="btn btn-sm btn-outline-secondary"
+                                    title="Tuyến chưa có trạng thái hợp lệ"
+                                    disabled>
+                                <i class="fas fa-question"></i>
                             </button>
+                            <% } %>
                         </td>
                     </tr>
                     <% }) %>
@@ -213,6 +296,17 @@ const safe = (v) => (v === null || v === undefined) ? '' : v;
                             </select>
                         </div>
 
+                        <div class="col-md-4">
+                            <label class="form-label">Giá vé tháng</label>
+                            <input type="number"
+                                   step="1000"
+                                   min="0"
+                                   name="monthlyPassPrice"
+                                   class="form-control"
+                                   placeholder="VD: 200000"
+                                   value="200000">
+                        </div>
+
                         <div class="col-12">
                             <label class="form-label">Mô tả</label>
                             <textarea name="description"
@@ -231,6 +325,82 @@ const safe = (v) => (v === null || v === undefined) ? '' : v;
         </div>
     </div>
 </div>
+
+<!-- ================= DETAIL MODALS ================= -->
+<% routeList.forEach((route, idx) => { %>
+<div class="modal fade"
+     id="detailRouteModal-<%= idx %>"
+     tabindex="-1"
+     aria-labelledby="detailRouteModalLabel-<%= idx %>"
+     aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="detailRouteModalLabel-<%= idx %>">
+                    Chi tiết tuyến - <%= safe(route.routeNumber) %>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+            </div>
+
+            <div class="modal-body">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label text-muted">Mã tuyến</label>
+                        <div class="form-control bg-light"><%= safe(route.routeNumber) %></div>
+                    </div>
+
+                    <div class="col-md-8">
+                        <label class="form-label text-muted">Tên tuyến</label>
+                        <div class="form-control bg-light"><%= safe(route.name) %></div>
+                    </div>
+
+                    <div class="col-md-4">
+                        <label class="form-label text-muted">Cự ly</label>
+                        <div class="form-control bg-light"><%= fmtDistance(route.distance) %></div>
+                    </div>
+
+                    <div class="col-md-4">
+                        <label class="form-label text-muted">Giờ hoạt động</label>
+                        <div class="form-control bg-light"><%= fmtOpTime(route) %></div>
+                    </div>
+
+                    <div class="col-md-4">
+                        <label class="form-label text-muted">Giá vé tháng</label>
+                        <div class="form-control bg-light"><%= fmtMoney(route.monthlyPassPrice) %></div>
+                    </div>
+
+                    <div class="col-md-4">
+                        <label class="form-label text-muted">Trạng thái</label>
+                        <div>
+                            <span class="badge <%= badgeClass(route.status) %>">
+                                <%= badgeText(route.status) %>
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="col-12">
+                        <label class="form-label text-muted">Mô tả</label>
+                        <div class="form-control bg-light" style="min-height: 90px;">
+                            <%= safe(route.description) || 'Chưa có mô tả' %>
+                        </div>
+                    </div>
+
+                    <div class="col-12">
+                        <label class="form-label text-muted">Số lượng trạm đang lưu</label>
+                        <div class="form-control bg-light">
+                            <%= Array.isArray(route.stops) ? route.stops.length : 0 %> trạm
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-light" data-bs-dismiss="modal">Đóng</button>
+            </div>
+        </div>
+    </div>
+</div>
+<% }) %>
 
 <!-- ================= EDIT MODALS (UC34) ================= -->
 <% routeList.forEach((route, idx) => { %>
@@ -299,13 +469,23 @@ const safe = (v) => (v === null || v === undefined) ? '' : v;
                         <div class="col-md-4">
                             <label class="form-label">Trạng thái</label>
                             <select class="form-select" name="status">
-                                <option value="ACTIVE" <%= (route.status || 'ACTIVE') === 'ACTIVE' ? 'selected' : '' %>>
+                                <option value="ACTIVE" <%= route.status === 'ACTIVE' ? 'selected' : '' %>>
                                     Đang hoạt động
                                 </option>
-                                <option value="INACTIVE" <%= (route.status || 'ACTIVE') === 'INACTIVE' ? 'selected' : '' %>>
+                                <option value="INACTIVE" <%= route.status === 'INACTIVE' ? 'selected' : '' %>>
                                     Tạm ngưng
                                 </option>
                             </select>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Giá vé tháng</label>
+                            <input type="number"
+                                   step="1000"
+                                   min="0"
+                                   name="monthlyPassPrice"
+                                   class="form-control"
+                                   value="<%= valueOrDefault(route.monthlyPassPrice, 200000) %>">
                         </div>
 
                         <div class="col-12">

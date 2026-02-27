@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= typeof title !== "undefined" ? title : "Nạp tiền vào ví" %></title>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
+
+  <style>
+    body { background: #f5f7fb; }
+    .wallet-card {
+      border: 0;
+      border-radius: 16px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.06);
+    }
+    .amount-btn {
+      border-radius: 12px;
+      font-weight: 600;
+      padding: 12px;
+    }
+    .amount-btn.active {
+      background: #0d6efd;
+      color: #fff;
+      border-color: #0d6efd;
+    }
+    .section-title {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+    .balance-box {
+      background: linear-gradient(135deg, #0b3b75, #0e63c7);
+      color: white;
+      border-radius: 16px;
+      padding: 18px;
+    }
+    .tx-table td, .tx-table th { vertical-align: middle; }
+    .note-box {
+      border-radius: 12px;
+      background: #fff8e1;
+      border: 1px solid #ffe08a;
+      color: #7a5a00;
+    }
+  </style>
+</head>
+<body>
+  <% 
+    const presetAmounts = [50000, 100000, 200000, 500000, 1000000, 2000000];
+    const recentTxs = (typeof walletTransactions !== 'undefined' && Array.isArray(walletTransactions))
+      ? walletTransactions
+      : ((typeof transactions !== 'undefined' && Array.isArray(transactions)) ? transactions : []);
+  %>
+
+  <!-- Nếu bạn muốn dùng header chung, mở dòng dưới -->
+  <!-- <%- include('../partials/header', { user, walletBalance }) %> -->
+
+  <div class="container py-4">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+      <div>
+        <h3 class="mb-1">Nạp tiền vào ví</h3>
+        <div class="text-muted">Thanh toán qua VNPAY Sandbox</div>
+      </div>
+      <a href="/passenger/wallet" class="btn btn-outline-secondary">
+        <i class="fa-solid fa-arrow-left me-1"></i> Quay lại ví
+      </a>
+    </div>
+
+    <% if (error) { %>
+      <div class="alert alert-danger"><%= error %></div>
+    <% } %>
+    <% if (success) { %>
+      <div class="alert alert-success"><%= success %></div>
+    <% } %>
+
+    <div class="row g-4">
+      <div class="col-lg-5">
+        <div class="card wallet-card mb-4">
+          <div class="card-body">
+            <div class="balance-box">
+              <div class="small opacity-75">Số dư ví hiện tại</div>
+              <div class="fs-2 fw-bold" id="walletBalanceText">
+                <%= Number(walletBalance || 0).toLocaleString("vi-VN") %> đ
+              </div>
+              <div class="small mt-2"><%= (user && user.fullName) ? user.fullName : "Hành khách" %></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card wallet-card">
+          <div class="card-body">
+            <div class="section-title">Hướng dẫn nạp tiền</div>
+            <ul class="mb-0">
+              <li>Chọn mệnh giá nạp (tối thiểu <b>10.000đ</b>)</li>
+              <li>Nhấn <b>Nạp tiền qua VNPAY</b></li>
+              <li>Hoàn tất thanh toán trên cổng VNPAY Sandbox</li>
+              <li>Hệ thống tự động cộng tiền vào ví khi giao dịch thành công</li>
+            </ul>
+
+            <div class="note-box p-3 mt-3 small">
+              <div class="fw-bold mb-1">Lưu ý</div>
+              <div>- Không đóng tab khi đang thanh toán.</div>
+              <div>- Nếu mạng chậm, số dư có thể cập nhật sau vài giây.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-7">
+        <div class="card wallet-card mb-4">
+          <div class="card-body">
+            <form method="POST" action="/passenger/wallet/deposit" id="depositForm">
+              <div class="section-title">1) Chọn mệnh giá</div>
+
+              <div class="row g-2 mb-3">
+                <% presetAmounts.forEach((a, idx) => { %>
+                  <div class="col-6 col-md-4">
+                    <button type="button"
+                            class="btn btn-outline-primary w-100 amount-btn <%= idx === 0 ? 'active' : '' %>"
+                            data-amount="<%= a %>">
+                      <%= Number(a).toLocaleString("vi-VN") %> đ
+                    </button>
+                  </div>
+                <% }) %>
+              </div>
+
+              <!-- Hoặc nhập số tiền khác -->
+              <div class="mb-3">
+                <label class="form-label fw-semibold">2) Hoặc nhập số tiền khác (VND)</label>
+                <input type="number"
+                       class="form-control"
+                       id="customAmountInput"
+                       min="10000"
+                       step="1000"
+                       placeholder="Ví dụ: 150000">
+                <div class="form-text">Nhập số tiền tối thiểu 10.000đ. Nếu nhập ở đây, hệ thống sẽ dùng số này thay cho mệnh giá đã chọn.</div>
+              </div>
+
+              <!-- Field backend cần -->
+              <input type="hidden" name="amount" id="amountInput" value="<%= presetAmounts[0] %>" />
+
+              <div class="mb-3">
+                <label class="form-label fw-semibold">3) Ngân hàng (tuỳ chọn)</label>
+                <select name="bankCode" class="form-select">
+                  <option value="">-- Cổng VNPAY tự chọn ngân hàng --</option>
+                  <option value="VNBANK">Nội địa (ATM/Tài khoản ngân hàng)</option>
+                  <option value="INTCARD">Thẻ quốc tế</option>
+                  <option value="QRPAY">VNPAY QR</option>
+                </select>
+              </div>
+
+              <div class="alert alert-light border small mb-3">
+                <div class="fw-semibold mb-1">Thông tin thanh toán</div>
+                <div>Số tiền nạp: <span id="previewAmount" class="fw-bold text-primary"><%= Number(presetAmounts[0]).toLocaleString("vi-VN") %> đ</span></div>
+                <div class="text-muted">Bạn sẽ được chuyển sang VNPAY để hoàn tất thanh toán.</div>
+              </div>
+
+              <button type="submit" class="btn btn-warning w-100 fw-bold">
+                <i class="fa-solid fa-wallet me-1"></i> Nạp tiền qua VNPAY
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <div class="card wallet-card">
+          <div class="card-body">
+            <div class="section-title">Giao dịch gần đây</div>
+            <div class="table-responsive">
+              <table class="table tx-table align-middle">
+                <thead>
+                  <tr>
+                    <th>Mã GD</th>
+                    <th>Loại</th>
+                    <th>Số tiền</th>
+                    <th>Phương thức</th>
+                    <th>Trạng thái</th>
+                    <th>Thời gian</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <% if (!recentTxs.length) { %>
+                    <tr>
+                      <td colspan="6" class="text-center text-muted">Chưa có giao dịch nào</td>
+                    </tr>
+                  <% } else { %>
+                    <% recentTxs.slice(0, 10).forEach(tx => { %>
+                      <tr>
+                        <td><%= tx.txnRef || tx.referenceCode || "-" %></td>
+                        <td>
+                          <% if (tx.txnType === "DEPOSIT") { %>
+                            Nạp ví
+                          <% } else if (tx.txnType === "MONTHLY_PASS") { %>
+                            Vé tháng
+                          <% } else { %>
+                            Khác
+                          <% } %>
+                        </td>
+                        <td class="fw-semibold <%= (tx.direction === 'IN') ? 'text-success' : 'text-danger' %>">
+                          <%= (tx.direction === 'IN') ? '+' : '-' %> <%= Number(tx.amount || 0).toLocaleString("vi-VN") %> đ
+                        </td>
+                        <td><%= tx.method || "-" %></td>
+                        <td>
+                          <% if (tx.status === "SUCCESS") { %>
+                            <span class="badge bg-success">SUCCESS</span>
+                          <% } else if (tx.status === "PENDING") { %>
+                            <span class="badge bg-warning text-dark">PENDING</span>
+                          <% } else if (tx.status === "CANCELLED") { %>
+                            <span class="badge bg-secondary">CANCELLED</span>
+                          <% } else { %>
+                            <span class="badge bg-danger"><%= tx.status || "FAILED" %></span>
+                          <% } %>
+                        </td>
+                        <td><%= tx.createdAt ? new Date(tx.createdAt).toLocaleString("vi-VN") : "-" %></td>
+                      </tr>
+                    <% }) %>
+                  <% } %>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ===== Chọn mệnh giá =====
+    const amountButtons = document.querySelectorAll(".amount-btn");
+    const amountInput = document.getElementById("amountInput");
+    const customAmountInput = document.getElementById("customAmountInput");
+    const previewAmount = document.getElementById("previewAmount");
+
+    function formatVND(n) {
+      return Number(n || 0).toLocaleString("vi-VN") + " đ";
+    }
+
+    function setAmount(value, fromCustom = false) {
+      const n = Number(value || 0);
+      if (!Number.isFinite(n) || n <= 0) return;
+
+      amountInput.value = n;
+      if (previewAmount) previewAmount.textContent = formatVND(n);
+
+      if (!fromCustom) {
+        // Nếu chọn preset thì clear ô custom để tránh nhầm
+        if (customAmountInput) customAmountInput.value = "";
+      }
+    }
+
+    amountButtons.forEach(btn => {
+      btn.addEventListener("click", () => {
+        amountButtons.forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        setAmount(btn.dataset.amount, false);
+      });
+    });
+
+    if (customAmountInput) {
+      customAmountInput.addEventListener("input", function () {
+        const v = Number(String(this.value || "").replace(/[^\d]/g, ""));
+        if (!v) return;
+
+        // bỏ active preset nếu user nhập custom
+        amountButtons.forEach(b => b.classList.remove("active"));
+        setAmount(v, true);
+      });
+    }
+
+    document.getElementById("depositForm").addEventListener("submit", function(e) {
+      const n = Number(amountInput.value || 0);
+      if (!n || n < 10000) {
+        e.preventDefault();
+        alert("Vui lòng chọn/nhập số tiền nạp tối thiểu 10.000 đ");
+        return;
+      }
+    });
+
+    // ===== Polling cập nhật số dư liên tục =====
+    (function () {
+      const walletEl = document.getElementById('walletBalanceText');
+      if (!walletEl) return;
+
+      let lastValue = null;
+      let isFetching = false;
+
+      async function fetchWalletBalance() {
+        if (isFetching) return;
+        isFetching = true;
+
+        try {
+          const res = await fetch('/passenger/wallet/balance', {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            cache: 'no-store',
+            credentials: 'same-origin'
+          });
+
+          if (!res.ok) return;
+
+          const data = await res.json();
+          if (!data || !data.ok) return;
+
+          const newValue = Number(data.walletBalance || 0);
+
+          if (newValue !== lastValue) {
+            walletEl.textContent = formatVND(newValue);
+            lastValue = newValue;
+
+            walletEl.style.transition = 'transform .18s ease, opacity .18s ease';
+            walletEl.style.transform = 'scale(1.04)';
+            walletEl.style.opacity = '0.9';
+            setTimeout(() => {
+              walletEl.style.transform = 'scale(1)';
+              walletEl.style.opacity = '1';
+            }, 180);
+          }
+        } catch (e) {
+          // bỏ qua lỗi polling tạm thời
+        } finally {
+          isFetching = false;
+        }
+      }
+
+      fetchWalletBalance();
+      const timer = setInterval(fetchWalletBalance, 3000);
+
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) fetchWalletBalance();
+      });
+
+      window.addEventListener('beforeunload', () => clearInterval(timer));
+    })();
+  </script>
+</body>
+</html>

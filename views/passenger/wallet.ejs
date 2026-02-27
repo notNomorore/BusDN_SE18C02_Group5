@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ví của tôi - BusDN</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background: #f4f6f9; font-family: 'Segoe UI', sans-serif; }
+        .page-card { border: 0; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,.04); }
+        .wallet-card {
+            background: linear-gradient(135deg, #0d4f9b 0%, #003f88 100%);
+            color: #fff; border-radius: 18px; padding: 22px;
+            box-shadow: 0 12px 30px rgba(0, 64, 136, .25);
+        }
+        .badge-soft {
+            background: #eef3ff;
+            color: #214c9e;
+            border: 1px solid #d7e3ff;
+        }
+        .money-in { color: #198754; font-weight: 700; }
+        .money-out { color: #dc3545; font-weight: 700; }
+        .table th { white-space: nowrap; }
+        .tx-note {
+            max-width: 260px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: inline-block;
+            vertical-align: bottom;
+        }
+    </style>
+</head>
+<body>
+    <%- include('../partials/header') %>
+
+    <%
+      // Tương thích cả 2 tên biến
+      const txs = Array.isArray(transactions)
+        ? transactions
+        : (Array.isArray(walletTransactions) ? walletTransactions : []);
+      const passes = Array.isArray(myPasses) ? myPasses : [];
+    %>
+
+    <div class="container my-4 my-lg-5">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <h2 class="fw-bold mb-1">Ví của tôi</h2>
+                <div class="text-muted">UC14 - Xem số dư ví và lịch sử giao dịch</div>
+            </div>
+            <a href="/profile" class="btn btn-outline-secondary">
+                <i class="fa-solid fa-arrow-left me-2"></i> Quay lại hồ sơ
+            </a>
+        </div>
+
+        <% if (error) { %>
+            <div class="alert alert-danger"><%= error %></div>
+        <% } %>
+        <% if (success) { %>
+            <div class="alert alert-success"><%= success %></div>
+        <% } %>
+
+        <div class="row g-4">
+            <!-- LEFT -->
+            <div class="col-lg-4">
+                <div class="wallet-card mb-4">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="opacity-75">Số dư ví hiện tại</div>
+                            <div class="display-6 fw-bold mt-1" id="walletBalanceText">
+                                <%= Number(walletBalance || 0).toLocaleString("vi-VN") %> đ
+                            </div>
+                            <div class="mt-2"><%= user && user.fullName ? user.fullName : "Hành khách" %></div>
+                        </div>
+                        <i class="fa-solid fa-wallet fa-2x opacity-75"></i>
+                    </div>
+                </div>
+
+                <div class="card page-card mb-4">
+                    <div class="card-body">
+                        <h5 class="fw-bold mb-3">Thao tác nhanh</h5>
+                        <div class="d-grid gap-2">
+                            <a href="/passenger/wallet/deposit" class="btn btn-warning fw-bold">
+                                <i class="fa-solid fa-plus me-2"></i> Nạp tiền vào ví
+                            </a>
+                            <a href="/passenger/passes/monthly" class="btn btn-primary fw-bold">
+                                <i class="fa-solid fa-ticket me-2"></i> Mua vé tháng
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card page-card">
+                    <div class="card-body">
+                        <h5 class="fw-bold mb-3">Vé tháng gần đây</h5>
+                        <% if (!passes.length) { %>
+                            <div class="text-muted">Bạn chưa có vé tháng nào.</div>
+                        <% } else { %>
+                            <div class="list-group list-group-flush">
+                                <% passes.slice(0,5).forEach(pass => { %>
+                                    <div class="list-group-item px-0">
+                                        <div class="d-flex justify-content-between align-items-start gap-2">
+                                            <div>
+                                                <div class="fw-semibold">
+                                                    <%= pass.routeId ? `${pass.routeId.routeNumber} - ${pass.routeId.name}` : 'Tuyến không xác định' %>
+                                                </div>
+                                                <small class="text-muted">
+                                                    Tháng <%= String(pass.month).padStart(2,'0') %>/<%= pass.year %>
+                                                </small>
+                                            </div>
+                                            <span class="badge <%= pass.status === 'ACTIVE' ? 'text-bg-success' : (pass.status === 'EXPIRED' ? 'text-bg-secondary' : 'text-bg-danger') %>">
+                                                <%= pass.status %>
+                                            </span>
+                                        </div>
+                                    </div>
+                                <% }) %>
+                            </div>
+                        <% } %>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT -->
+            <div class="col-lg-8">
+                <div class="card page-card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="fw-bold mb-0">Lịch sử giao dịch ví</h5>
+                            <span class="badge badge-soft rounded-pill">20 giao dịch gần nhất</span>
+                        </div>
+
+                        <% if (!txs.length) { %>
+                            <div class="text-center py-5 text-muted">
+                                <i class="fa-solid fa-receipt fa-2x mb-3 opacity-50"></i>
+                                <div>Chưa có giao dịch nào.</div>
+                            </div>
+                        <% } else { %>
+                            <div class="table-responsive">
+                                <table class="table align-middle">
+                                    <thead>
+                                        <tr>
+                                            <th>Loại GD</th>
+                                            <th>Số tiền</th>
+                                            <th>Phương thức</th>
+                                            <th>Trạng thái</th>
+                                            <th>Thời gian</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <% txs.forEach(tx => { %>
+                                            <tr>
+                                                <td>
+                                                    <% if (tx.txnType === 'DEPOSIT') { %>
+                                                        <div class="fw-semibold">Nạp tiền ví</div>
+                                                        <small class="text-muted"><%= tx.txnRef || '' %></small>
+                                                    <% } else if (tx.txnType === 'MONTHLY_PASS') { %>
+                                                        <div class="fw-semibold">Mua vé tháng</div>
+                                                        <small class="text-muted tx-note" title="<%= tx.note || '' %>"><%= tx.note || '' %></small>
+                                                    <% } else { %>
+                                                        <div class="fw-semibold"><%= tx.txnType || 'Khác' %></div>
+                                                        <small class="text-muted tx-note" title="<%= tx.note || '' %>"><%= tx.note || '' %></small>
+                                                    <% } %>
+                                                </td>
+
+                                                <td class="<%= tx.direction === 'IN' ? 'money-in' : 'money-out' %>">
+                                                    <%= tx.direction === 'IN' ? '+' : '-' %>
+                                                    <%= Number(tx.amount || 0).toLocaleString("vi-VN") %> đ
+                                                </td>
+
+                                                <td><%= tx.method || '-' %></td>
+
+                                                <td>
+                                                    <% if (tx.status === 'SUCCESS') { %>
+                                                        <span class="badge text-bg-success">SUCCESS</span>
+                                                    <% } else if (tx.status === 'PENDING') { %>
+                                                        <span class="badge text-bg-warning text-dark">PENDING</span>
+                                                    <% } else if (tx.status === 'CANCELLED') { %>
+                                                        <span class="badge text-bg-secondary">CANCELLED</span>
+                                                    <% } else { %>
+                                                        <span class="badge text-bg-danger"><%= tx.status || 'FAILED' %></span>
+                                                    <% } %>
+                                                </td>
+
+                                                <td>
+                                                    <%= new Date(tx.paidAt || tx.createdAt).toLocaleString("vi-VN") %>
+                                                </td>
+                                            </tr>
+                                        <% }) %>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <% } %>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function refreshWalletBalance() {
+            try {
+                const res = await fetch("/passenger/wallet/balance", {
+                    headers: { "Accept": "application/json" },
+                    cache: "no-store",
+                    credentials: "same-origin"
+                });
+                if (!res.ok) return;
+
+                const data = await res.json();
+                if (!data || !data.ok) return;
+
+                const el = document.getElementById("walletBalanceText");
+                if (el) {
+                    el.textContent = `${data.walletBalanceText} đ`;
+                }
+            } catch (e) {
+                // silent fail
+            }
+        }
+
+        refreshWalletBalance();
+        const walletTimer = setInterval(refreshWalletBalance, 5000);
+
+        document.addEventListener("visibilitychange", () => {
+            if (!document.hidden) refreshWalletBalance();
+        });
+
+        window.addEventListener("beforeunload", () => clearInterval(walletTimer));
+    </script>
+</body>
+</html>
