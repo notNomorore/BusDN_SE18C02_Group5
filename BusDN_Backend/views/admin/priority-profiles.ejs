@@ -1,0 +1,170 @@
+<% function statusLabel(s) { return { NONE: '—' , PENDING: 'Chờ duyệt' , APPROVED: 'Đã duyệt' , REJECTED: 'Từ chối' }[s]
+    || s; } %>
+    <div class="d-flex justify-content-between align-items-center pb-2 mb-3 border-bottom">
+        <h1 class="h2"><i class="fas fa-id-card me-2 text-warning"></i> Duyệt Hồ Sơ Ưu Tiên</h1>
+    </div>
+
+    <!-- Thống kê nhanh -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-4">
+            <div class="card border-0 bg-warning bg-opacity-10 text-center p-3">
+                <div class="h3 fw-bold text-warning">
+                    <%= stats.pending %>
+                </div>
+                <div class="small text-muted"><i class="fas fa-clock me-1"></i> Chờ duyệt</div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card border-0 bg-success bg-opacity-10 text-center p-3">
+                <div class="h3 fw-bold text-success">
+                    <%= stats.approved %>
+                </div>
+                <div class="small text-muted"><i class="fas fa-check me-1"></i> Đã duyệt</div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card border-0 bg-danger bg-opacity-10 text-center p-3">
+                <div class="h3 fw-bold text-danger">
+                    <%= stats.rejected %>
+                </div>
+                <div class="small text-muted"><i class="fas fa-times me-1"></i> Đã từ chối</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Danh sách hồ sơ PENDING -->
+    <% if (profiles.length===0) { %>
+        <div class="card shadow-sm">
+            <div class="card-body text-center py-5 text-muted">
+                <i class="fas fa-check-double fa-3x mb-3 text-success opacity-50"></i>
+                <h5>Không có hồ sơ nào đang chờ duyệt</h5>
+                <p class="small">Tất cả hồ sơ ưu tiên đã được xử lý.</p>
+            </div>
+        </div>
+        <% } else { %>
+            <div class="row g-4">
+                <% profiles.forEach(profile=> { %>
+                    <div class="col-md-6">
+                        <div class="card shadow-sm h-100">
+                            <div class="card-header bg-warning bg-opacity-10 fw-bold d-flex align-items-center gap-2">
+                                <img src="<%= profile.avatar || '/images/default-avatar.png' %>"
+                                    class="rounded-circle border border-warning" width="36" height="36"
+                                    style="object-fit:cover" onerror="this.src='https://via.placeholder.com/36'">
+                                <div>
+                                    <div>
+                                        <%= profile.fullName %>
+                                    </div>
+                                    <small class="text-muted fw-normal">
+                                        <%= profile.email %>
+                                    </small>
+                                </div>
+                                <span class="ms-auto badge bg-warning text-dark">Chờ duyệt</span>
+                            </div>
+                            <div class="card-body">
+                                <!-- Số thẻ và ngày nộp -->
+                                <dl class="row small mb-3">
+                                    <dt class="col-5 text-muted">Số thẻ / CMND:</dt>
+                                    <dd class="col-7 fw-semibold">
+                                        <%= profile.priorityProfile.cardNumber || 'Chưa cung cấp' %>
+                                    </dd>
+                                    <dt class="col-5 text-muted">Ngày nộp hồ sơ:</dt>
+                                    <dd class="col-7">
+                                        <%= new Date(profile.updatedAt).toLocaleDateString('vi-VN') %>
+                                    </dd>
+                                </dl>
+
+                                <!-- Ảnh thẻ -->
+                                <div class="row g-2 mb-3">
+                                    <% if (profile.priorityProfile.cardImageFront) { %>
+                                        <div class="col-6">
+                                            <p class="small text-muted mb-1 fw-semibold"><i
+                                                    class="fas fa-image me-1"></i>Mặt trước</p>
+                                            <a href="<%= profile.priorityProfile.cardImageFront %>" target="_blank"
+                                                data-bs-toggle="modal" data-bs-target="#imgModal"
+                                                data-img="<%= profile.priorityProfile.cardImageFront %>"
+                                                data-caption="Mặt trước thẻ - <%= profile.fullName %>"
+                                                onclick="showModal(this)">
+                                                <img src="<%= profile.priorityProfile.cardImageFront %>"
+                                                    class="img-fluid rounded border border-2 border-primary"
+                                                    style="height:130px; width:100%; object-fit:cover; cursor:zoom-in"
+                                                    alt="Mặt trước thẻ"
+                                                    onerror="this.src='https://via.placeholder.com/200x130?text=Không+tải+được'">
+                                            </a>
+                                        </div>
+                                        <% } %>
+                                            <% if (profile.priorityProfile.cardImageBack) { %>
+                                                <div class="col-6">
+                                                    <p class="small text-muted mb-1 fw-semibold"><i
+                                                            class="fas fa-image me-1"></i>Mặt sau</p>
+                                                    <a href="#" data-bs-toggle="modal" data-bs-target="#imgModal"
+                                                        data-img="<%= profile.priorityProfile.cardImageBack %>"
+                                                        data-caption="Mặt sau thẻ - <%= profile.fullName %>"
+                                                        onclick="showModal(this); return false;">
+                                                        <img src="<%= profile.priorityProfile.cardImageBack %>"
+                                                            class="img-fluid rounded border border-2 border-secondary"
+                                                            style="height:130px; width:100%; object-fit:cover; cursor:zoom-in"
+                                                            alt="Mặt sau thẻ"
+                                                            onerror="this.src='https://via.placeholder.com/200x130?text=Không+tải+được'">
+                                                    </a>
+                                                </div>
+                                                <% } %>
+                                                    <% if (!profile.priorityProfile.cardImageFront &&
+                                                        !profile.priorityProfile.cardImageBack) { %>
+                                                        <div class="col-12 text-muted small fst-italic">
+                                                            <i
+                                                                class="fas fa-exclamation-triangle text-warning me-1"></i>
+                                                            Người dùng chưa cung cấp ảnh thẻ.
+                                                        </div>
+                                                        <% } %>
+                                </div>
+
+                                <!-- Nút Duyệt / Từ chối -->
+                                <div class="d-flex gap-2">
+                                    <form method="POST" action="/admin/staff/verify-priority/<%= profile._id %>"
+                                        class="flex-fill"
+                                        onsubmit="return confirm('Duyệt hồ sơ của <%= profile.fullName %>?')">
+                                        <input type="hidden" name="action" value="approve">
+                                        <button type="submit" class="btn btn-success w-100">
+                                            <i class="fas fa-check me-1"></i> Duyệt
+                                        </button>
+                                    </form>
+                                    <form method="POST" action="/admin/staff/verify-priority/<%= profile._id %>"
+                                        class="flex-fill"
+                                        onsubmit="return confirm('Từ chối hồ sơ của <%= profile.fullName %>?')">
+                                        <input type="hidden" name="action" value="reject">
+                                        <button type="submit" class="btn btn-outline-danger w-100">
+                                            <i class="fas fa-times me-1"></i> Từ chối
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <% }) %>
+            </div>
+            <% } %>
+
+                <!-- Modal phóng to ảnh -->
+                <div class="modal fade" id="imgModal" tabindex="-1" aria-labelledby="imgModalLabel" aria-hidden="true">
+                    <div class="modal-dialog modal-lg modal-dialog-centered">
+                        <div class="modal-content bg-dark">
+                            <div class="modal-header border-0">
+                                <h5 class="modal-title text-white" id="imgModalLabel">Xem ảnh thẻ</h5>
+                                <button type="button" class="btn-close btn-close-white"
+                                    data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body text-center p-2">
+                                <img id="modalImg" src="" class="img-fluid rounded" style="max-height:80vh"
+                                    alt="Ảnh thẻ">
+                                <p id="modalCaption" class="text-white-50 small mt-2"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <script>
+                    function showModal(el) {
+                        document.getElementById('modalImg').src = el.dataset.img;
+                        document.getElementById('modalCaption').textContent = el.dataset.caption || '';
+                    }
+                </script>

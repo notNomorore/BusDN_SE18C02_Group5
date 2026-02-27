@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 const { User } = require('../models/models');
 const { checkPassword, PASS_ERR_MSG } = require('../config/helpers');
+const { getAllRoutes, getRouteDetail, getRouteGeoJSON } = require('../controllers/routeController');
 
 // This module exports a function that takes upload middleware
 module.exports = (upload) => {
@@ -231,6 +232,21 @@ module.exports = (upload) => {
 
         return res.redirect('/profile?success=' + encodeURIComponent('Đổi mật khẩu thành công!'));
     });
+
+    // --- ROUTE LOOKUP PAGE ---
+    router.get('/route-lookup', (req, res) => {
+        res.render('route-lookup');
+    });
+
+    // --- PUBLIC API ROUTES (NO AUTHENTICATION) ---
+    // Get all routes with optional search filter
+    router.get('/api/public/routes', getAllRoutes);
+
+    // Get detailed route information with stops
+    router.get('/api/public/routes/:routeId', getRouteDetail);
+
+    // Get route GeoJSON data for map display
+    router.get('/api/public/routes/:routeId/geojson', getRouteGeoJSON);
 
     return router;
 };

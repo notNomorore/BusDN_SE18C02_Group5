@@ -1,0 +1,178 @@
+<footer class="main-footer">
+    <div class="footer-container">
+        <div class="footer-column">
+            <h3 class="footer-heading">BusDN</h3>
+            <p class="footer-text">
+                Trung tâm Điều hành Giao thông Thông minh Đà Nẵng. 
+                Cung cấp giải pháp di chuyển công cộng hiện đại, tiện lợi và thân thiện cho người dân thành phố.
+            </p>
+            <div class="social-links">
+                <a href="#"><i class="fab fa-facebook"></i></a>
+                <a href="#"><i class="fab fa-youtube"></i></a>
+                <a href="#"><i class="fab fa-google-play"></i></a>
+                <a href="#"><i class="fab fa-apple"></i></a>
+            </div>
+        </div>
+
+        <div class="footer-column">
+            <h3 class="footer-heading">LIÊN HỆ</h3>
+            <ul class="footer-list">
+                <li><i class="fas fa-map-marker-alt"></i> Khu C3, 493 Trần Cao Vân, Q. Thanh Khê, Tp. Đà Nẵng</li>
+                <li><i class="fas fa-phone"></i> 0236 3711 468</li>
+                <li><i class="fas fa-envelope"></i> datramac123@gmail.com</li>
+                <li><i class="fas fa-clock"></i> Thứ 2 - Thứ 6: 07:30 - 17:30</li>
+            </ul>
+        </div>
+
+        <div class="footer-column">
+            <h3 class="footer-heading">CHÍNH SÁCH</h3>
+            <ul class="footer-list">
+                <li><a href="#">Điều khoản sử dụng</a></li>
+                <li><a href="#">Chính sách bảo mật</a></li>
+                <li><a href="#">Hướng dẫn thanh toán</a></li>
+                <li><a href="#">Câu hỏi thường gặp (FAQ)</a></li>
+            </ul>
+        </div>
+
+        <div class="footer-column">
+            <h3 class="footer-heading">LIÊN KẾT</h3>
+            <ul class="footer-list">
+                <li><a href="https://danang.gov.vn" target="_blank">UBND TP Đà Nẵng</a></li>
+                <li><a href="#" target="_blank">Sở Giao thông Vận tải</a></li>
+                <li><a href="#" target="_blank">Sở Xây dựng</a></li>
+                <li><a href="#" target="_blank">Sở Khoa học và Công nghệ</a></li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="footer-bottom">
+        <p>Trung tâm điều hành giao thông thông minh Đà Nẵng</p>
+        <p>Giấy phép: 497/GP-SVHTTDL Sở Văn hoá, Thể thao và Du lịch thành phố Đà Nẵng cấp ngày 30 tháng 05 năm 2025.</p>
+        <p>&copy; 2026 BusDN. Tất cả quyền được bảo lưu. Thiết kế bởi <strong>Gemini Team</strong>.</p>
+    </div>
+
+    <a href="#" class="back-to-top"><i class="fas fa-chevron-up"></i></a>
+</footer>
+
+<style>
+    .main-footer {
+        background-color: #003366;
+        color: #ffffff;
+        padding: 50px 0 20px 0;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        flex-shrink: 0;
+    }
+
+    .footer-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 30px;
+        padding: 0 20px;
+    }
+
+    .footer-heading {
+        font-size: 18px;
+        font-weight: bold;
+        margin-bottom: 20px;
+        position: relative;
+        padding-bottom: 10px;
+    }
+
+    .footer-heading::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        bottom: 0;
+        width: 50px;
+        height: 2px;
+        background-color: #00a8ff; /* Màu xanh nhạt tạo điểm nhấn */
+    }
+
+    .footer-text {
+        line-height: 1.6;
+        font-size: 14px;
+        color: #d1d1d1;
+    }
+
+    .footer-list {
+        list-style: none;
+        padding: 0;
+    }
+
+    .footer-list li {
+        margin-bottom: 12px;
+        font-size: 14px;
+        color: #d1d1d1;
+        display: flex;
+        align-items: flex-start;
+    }
+
+    .footer-list li i {
+        margin-right: 10px;
+        margin-top: 3px;
+        color: #00a8ff;
+    }
+
+    .footer-list li a {
+        color: #d1d1d1;
+        text-decoration: none;
+        transition: color 0.3s;
+    }
+
+    .footer-list li a:hover {
+        color: #ffffff;
+        text-decoration: underline;
+    }
+
+    .social-links {
+        margin-top: 20px;
+    }
+
+    .social-links a {
+        color: #ffffff;
+        background: rgba(255,255,255,0.1);
+        width: 35px;
+        height: 35px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        margin-right: 10px;
+        transition: 0.3s;
+    }
+
+    .social-links a:hover {
+        background: #00a8ff;
+        transform: translateY(-3px);
+    }
+
+    .footer-bottom {
+        text-align: center;
+        border-top: 1px solid rgba(255,255,255,0.1);
+        margin-top: 40px;
+        padding: 20px 20px 0 20px;
+        font-size: 13px;
+        color: #aaaaaa;
+    }
+
+    .footer-bottom p {
+        margin: 5px 0;
+    }
+
+    /* Responsive cho mobile */
+    @media (max-width: 768px) {
+        .footer-container {
+            grid-template-columns: 1fr;
+            text-align: center;
+        }
+        .footer-heading::after {
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        .footer-list li {
+            justify-content: center;
+        }
+    }
+</style>

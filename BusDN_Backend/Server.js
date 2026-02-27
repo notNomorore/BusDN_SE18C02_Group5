@@ -1,8 +1,7 @@
 const express = require('express');
-const mongoose = require('mongoose');
 const multer = require('multer');
 const path = require('path');
-
+const connectDB = require('./config/connectdb');
 // --- 1. IMPORT CONFIGURATIONS ---
 const configViewEngine = require('./config/viewEngine');
 const configPassport = require('./config/passport');
@@ -16,10 +15,7 @@ configViewEngine(app);
 configPassport(app);
 
 // --- 4. MONGODB CONNECTION ---
-mongoose.connect('mongodb+srv://DE181046:nhatminh@busdn.2y1qib0.mongodb.net/?appName=BusDN')
-    .then(() => console.log("✅ Đã kết nối MongoDB Atlas"))
-    .catch(err => console.error("❌ Lỗi kết nối DB:", err));
-
+connectDB();
 // --- 5. ROUTES CONFIGURATION ---
 const webRoutes = require('./routes/webRoutes')(upload);
 const adminRoutes = require('./routes/adminRoutes');

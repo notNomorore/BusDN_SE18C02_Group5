@@ -1,15 +1,15 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
-const { User } = require('../models');
-
+const { User } = require('../models/models');
+require('dotenv').config();
 // Configure Nodemailer (Placeholder as requested, but functional if credentials provided)
 // For real testing, use Ethereal or a real service.
 const transporter = nodemailer.createTransport({
     service: 'gmail', // or your service
     auth: {
-        user: 'nguyennhatminhnau@gmail.com',
-        pass: 'pcum hoif vant qygx'
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
     }
 });
 
