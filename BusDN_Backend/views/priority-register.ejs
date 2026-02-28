@@ -1,0 +1,232 @@
+<%- include('./partials/header') %>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
+<style>
+    /* Bọc toàn bộ trong ID này để cô lập hoàn toàn */
+    #priority-page-scope {
+        background-color: #f8f9fa;
+        min-height: 100vh;
+        padding: 40px 0;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        display: block;
+        clear: both;
+    }
+
+    #priority-page-scope .priority-container {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 0 15px;
+    }
+    
+    #priority-page-scope .priority-card {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        padding: 40px;
+    }
+    
+    #priority-page-scope .priority-header {
+        text-align: center;
+        margin-bottom: 30px;
+        border-bottom: 2px solid #003366;
+        padding-bottom: 20px;
+    }
+    
+    #priority-page-scope .priority-header h1 {
+        color: #003366 !important;
+        margin: 0 0 10px 0;
+        font-size: 28px;
+        font-weight: 700;
+        border: none !important; /* Tránh trùng border của header cũ */
+    }
+
+    /* Giữ nguyên các class form từ bản cũ của bạn */
+    #priority-page-scope .form-group-custom {
+        margin-bottom: 20px;
+        text-align: left;
+    }
+    
+    #priority-page-scope .label-custom {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 600;
+        color: #333;
+        font-size: 14px;
+    }
+    
+    #priority-page-scope .btn-submit-priority {
+        background-color: #003366 !important;
+        color: white !important;
+        padding: 12px 30px;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s;
+        width: 100%;
+        font-size: 16px;
+    }
+
+    #priority-page-scope .btn-submit-priority:hover:not(:disabled) {
+        background-color: #002244 !important;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    #priority-page-scope .instructions {
+        background-color: #e3f2fd;
+        border-left: 4px solid #003366;
+        padding: 15px;
+        margin-bottom: 25px;
+        border-radius: 4px;
+    }
+
+    #priority-page-scope .file-upload-area {
+        border: 2px dashed #003366;
+        border-radius: 8px;
+        padding: 25px;
+        background-color: #f9f9f9;
+        text-align: center;
+        cursor: pointer;
+        transition: 0.3s;
+    }
+
+    #priority-page-scope .file-upload-area:hover {
+        background-color: #f0f5ff;
+        border-color: #0056b3;
+    }
+
+    #priority-page-scope input[type="text"].input-custom,
+    #priority-page-scope select.select-custom {
+        width: 100%;
+        padding: 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 14px;
+        outline: none;
+    }
+
+    #priority-page-scope .file-name-display {
+        margin-top: 8px;
+        font-size: 13px;
+        color: #2e7d32;
+        display: none;
+        font-weight: 500;
+    }
+
+    /* Fix lỗi label bị nhảy của bản trước */
+    #priority-page-scope .text-red { color: red; }
+</style>
+
+<div id="priority-page-scope">
+    <div class="priority-container">
+        <div class="priority-card">
+            <div class="priority-header">
+                <h1><i class="fas fa-id-card me-2"></i> Đăng ký hồ sơ ưu tiên</h1>
+                <p>Đăng ký một lần để nhận ưu đãi giảm giá vé dài hạn</p>
+            </div>
+
+            <% if (typeof error !== 'undefined' && error) { %>
+                <div style="background: #f8d7da; color: #721c24; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
+                    <i class="fas fa-exclamation-triangle me-2"></i> <%= error %>
+                </div>
+            <% } %>
+
+            <form action="/priority/register" method="POST" enctype="multipart/form-data" id="priorityForm">
+                <div class="instructions">
+                    <h4 style="margin: 0 0 10px 0; font-size: 16px; color: #003366;"><i class="fas fa-info-circle me-2"></i> Yêu cầu hồ sơ</h4>
+                    <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #555;">
+                        <li>Giấy tờ bắt buộc: CCCD (Mặt trước/sau) và Giấy tờ chứng minh ưu tiên.</li>
+                        <li>Định dạng: JPG, PNG. Dung lượng tối đa: 10MB/file.</li>
+                    </ul>
+                </div>
+
+                <div class="form-group-custom">
+                    <label class="label-custom">Đối tượng <span class="text-red">*</span></label>
+                    <select name="category" class="select-custom" required>
+                        <option value="">-- Chọn đối tượng --</option>
+                        <option value="Student">Học sinh, Sinh viên</option>
+                        <option value="Elderly">Người cao tuổi (60+)</option>
+                        <option value="Disabled">Người khuyết tật</option>
+                        <option value="War Veteran">Thương binh</option>
+                    </select>
+                </div>
+
+                <div class="form-group-custom">
+                    <label class="label-custom">Số thẻ / Mã định danh <span class="text-red">*</span></label>
+                    <input type="text" name="idNumber" class="input-custom" placeholder="Nhập số thẻ của bạn" required>
+                </div>
+
+                <div class="form-group-custom">
+                    <label class="label-custom">Mặt trước thẻ <span class="text-red">*</span></label>
+                    <div class="file-upload-area" onclick="document.getElementById('idCardFront').click()">
+                        <input type="file" name="idCardFront" id="idCardFront" hidden accept="image/*" required>
+                        <i class="fas fa-camera fa-2x" style="color: #003366;"></i>
+                        <p style="margin: 10px 0 0 0; font-size: 13px;">Bấm để tải ảnh Mặt trước</p>
+                        <div id="idCardFrontName" class="file-name-display"></div>
+                    </div>
+                </div>
+
+                <div class="form-group-custom">
+                    <label class="label-custom">Mặt sau thẻ <span class="text-red">*</span></label>
+                    <div class="file-upload-area" onclick="document.getElementById('idCardBack').click()">
+                        <input type="file" name="idCardBack" id="idCardBack" hidden accept="image/*" required>
+                        <i class="fas fa-camera fa-2x" style="color: #003366;"></i>
+                        <p style="margin: 10px 0 0 0; font-size: 13px;">Bấm để tải ảnh Mặt sau</p>
+                        <div id="idCardBackName" class="file-name-display"></div>
+                    </div>
+                </div>
+
+                <div class="form-group-custom">
+                    <label class="label-custom">Giấy tờ minh chứng ưu tiên <span class="text-red">*</span></label>
+                    <div class="file-upload-area" onclick="document.getElementById('proofImage').click()">
+                        <input type="file" name="proofImage" id="proofImage" hidden accept="image/*" required>
+                        <i class="fas fa-file-alt fa-2x" style="color: #003366;"></i>
+                        <p style="margin: 10px 0 0 0; font-size: 13px;">Tải lên Thẻ SV / Giấy xác nhận</p>
+                        <div id="proofImageName" class="file-name-display"></div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 30px;">
+                    <button type="submit" class="btn-submit-priority" id="submitBtn">
+                        <i class="fas fa-paper-plane me-2"></i> Gửi hồ sơ đăng ký
+                    </button>
+                    <a href="/profile" style="display: block; text-align: center; margin-top: 15px; color: #666; font-size: 14px; text-decoration: none;">
+                        <i class="fas fa-arrow-left me-1"></i> Quay lại hồ sơ
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    const fileInputs = ['idCardFront', 'idCardBack', 'proofImage'];
+    
+    fileInputs.forEach(id => {
+        const input = document.getElementById(id);
+        const nameDisplay = document.getElementById(id + 'Name');
+        
+        input.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                const file = e.target.files[0];
+                if (file.size > 10 * 1024 * 1024) {
+                    alert('File quá lớn! Tối đa 10MB.');
+                    input.value = '';
+                    return;
+                }
+                nameDisplay.innerHTML = `<i class="fas fa-check-circle"></i> Đã chọn: ${file.name}`;
+                nameDisplay.style.display = 'block';
+            }
+        });
+    });
+
+    document.getElementById('priorityForm').addEventListener('submit', function() {
+        const btn = document.getElementById('submitBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Đang xử lý...';
+    });
+</script>
+
+<%- include('./partials/footer') %>

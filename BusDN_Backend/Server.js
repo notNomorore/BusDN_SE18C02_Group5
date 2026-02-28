@@ -5,7 +5,7 @@ const connectDB = require('./config/connectdb');
 // --- 1. IMPORT CONFIGURATIONS ---
 const configViewEngine = require('./config/viewEngine');
 const configPassport = require('./config/passport');
-const { upload } = require('./config/multer');
+const { upload, priorityProfileUpload } = require('./config/multer');
 
 // --- 2. SETUP EXPRESS APP ---
 const app = express();
@@ -20,9 +20,13 @@ connectDB();
 const webRoutes = require('./routes/webRoutes')(upload);
 const adminRoutes = require('./routes/adminRoutes');
 const authRoutes = require('./routes/authRoutes');
+const priorityRoutes = require('./routes/priorityRoutes')(priorityProfileUpload);
 
 // Web routes (home, login, register, profile, etc.)
 app.use('/', webRoutes);
+
+// Priority profile routes (user and admin)
+app.use('/priority', priorityRoutes);
 
 // Admin routes (require isAdmin middleware)
 app.use('/admin', adminRoutes);

@@ -2,8 +2,9 @@ const express = require('express');
 const router = express.Router();
 const { isAdmin } = require('../middleware/adminMiddleware');
 const { renderAdmin } = require('../middleware/renderAdmin');
-const { User } = require('../models/models');
+const { User, PriorityProfile } = require('../models/models');
 const adminController = require('../controllers/adminController');
+const priorityController = require('../controllers/priorityController');
 
 // --- ADMIN API ROUTES (Handle operations) - Define specific routes first ---
 
@@ -23,9 +24,10 @@ router.get('/staff/create', adminController.getCreateStaff);
 router.post('/staff/create', adminController.createStaff);
 router.post('/staff/:userId/toggle-lock', adminController.toggleLock); // Nút khóa/mở
 
-// Quản lý hồ sơ ưu tiên
-router.get('/priority-profiles', adminController.getPriorityProfiles);
-router.post('/priority-profiles/:userId/approve', adminController.approveProfile); // Nút duyệt
-router.post('/priority-profiles/:userId/reject', adminController.rejectProfile);   // Nút từ chối
+// Quản lý hồ sơ ưu tiên (Priority Profile Management)
+router.get('/priority-profiles', isAdmin, priorityController.listProfiles);
+router.get('/priority-profiles/:profileId', isAdmin, priorityController.viewProfileDetail);
+router.post('/priority-profiles/:profileId/approve', isAdmin, priorityController.approveProfile);
+router.post('/priority-profiles/:profileId/reject', isAdmin, priorityController.rejectProfile);
 
 module.exports = router;
