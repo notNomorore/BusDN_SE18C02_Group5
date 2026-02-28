@@ -32,11 +32,11 @@
             cursor: pointer;
         }
 
-        /* Style cho nút con mắt hiện mật khẩu */
         .password-toggle {
             cursor: pointer;
             color: #6c757d;
             z-index: 10;
+            right: 15px !important;
         }
 
         .password-toggle:hover {
@@ -48,25 +48,25 @@
             display: none;
         }
 
-        /* 2. Chỉnh lại vị trí con mắt của mình cho đẹp hơn */
-        .password-toggle {
-            cursor: pointer;
-            color: #6c757d;
-            z-index: 10;
-            /* Đảm bảo nó nằm gọn bên phải */
-            right: 15px !important;
-        }
-
-        /* 3. Thêm padding cho ô input để chữ không bị dính vào con mắt */
         input[type="password"],
         input[type="text"] {
             padding-right: 40px;
+        }
+
+        .wallet-balance-animate {
+            transition: transform .18s ease, opacity .18s ease;
+        }
+
+        .feature-card {
+            border: 1px solid #eef0f3;
+            border-radius: 12px;
+            padding: 14px;
+            background: #fff;
         }
     </style>
 </head>
 
 <body>
-
     <%- include('partials/header') %>
 
         <div class="container my-5">
@@ -83,9 +83,11 @@
                         <% } %>
 
                             <div class="row">
+                                <!-- LEFT -->
                                 <div class="col-lg-4 mb-4">
                                     <div class="card border-0 shadow-sm text-center p-4 h-100"
                                         style="background: linear-gradient(180deg, #ffffff 0%, #eef2f7 100%);">
+
                                         <div class="position-relative d-inline-block mb-3">
                                             <img src="<%= user.avatar || 'https://via.placeholder.com/150' %>"
                                                 class="rounded-circle border border-4 border-white shadow" width="120"
@@ -108,37 +110,55 @@
                                             <%= user.role || 'Hành khách' %>
                                         </p>
 
+                                        <!-- WALLET CARD -->
                                         <div class="card bg-primary text-white p-3 mb-3 text-start shadow-sm"
                                             style="background: #003366 !important;">
                                             <div class="d-flex justify-content-between align-items-center">
-                                                <div>
+                                                <div class="w-100">
                                                     <small class="opacity-75">Số dư ví BusDN</small>
-                                                    <h4 class="fw-bold mb-0">250.000 đ</h4>
+                                                    <div class="fs-4 fw-bold wallet-balance-animate"
+                                                        id="walletBalanceText">
+                                                        <%= Number(user.walletBalance || walletBalance ||
+                                                            0).toLocaleString("vi-VN") %> đ
+                                                    </div>
+
+                                                    <div class="d-grid gap-2 mt-2">
+                                                        <a href="/passenger/wallet"
+                                                            class="btn btn-light btn-sm fw-bold">
+                                                            <i class="fa-solid fa-wallet me-1"></i> Xem ví của tôi
+                                                        </a>
+                                                        <a href="/passenger/wallet/deposit"
+                                                            class="btn btn-warning btn-sm fw-bold">
+                                                            <i class="fa-solid fa-plus me-1"></i> Nạp tiền vào ví
+                                                        </a>
+                                                    </div>
                                                 </div>
-                                                <i class="fa-solid fa-wallet fa-2x opacity-50"></i>
+                                                <i class="fa-solid fa-wallet fa-2x opacity-50 ms-3"></i>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
 
+                                <!-- RIGHT -->
                                 <div class="col-lg-8">
                                     <div class="card border-0 shadow-sm p-4 h-100">
                                         <ul class="nav nav-pills mb-4 nav-justified" id="pills-tab" role="tablist">
                                             <li class="nav-item p-1">
                                                 <button class="nav-link active fw-bold" id="info-tab"
-                                                    data-bs-toggle="pill" data-bs-target="#pills-info">
+                                                    data-bs-toggle="pill" data-bs-target="#pills-info" type="button">
                                                     <i class="fa-solid fa-user-pen me-2"></i> Thông tin
                                                 </button>
                                             </li>
                                             <li class="nav-item p-1">
-                                                <button class="nav-link fw-bold text-dark" id="ticket-tab"
-                                                    data-bs-toggle="pill" data-bs-target="#pills-ticket">
-                                                    <i class="fa-solid fa-ticket me-2"></i> Vé của tôi
+                                                <button class="nav-link fw-bold text-dark" id="wallet-tab"
+                                                    data-bs-toggle="pill" data-bs-target="#pills-wallet" type="button">
+                                                    <i class="fa-solid fa-wallet me-2"></i> Ví / Vé tháng
                                                 </button>
                                             </li>
                                             <li class="nav-item p-1">
                                                 <button class="nav-link fw-bold text-dark" id="security-tab"
-                                                    data-bs-toggle="pill" data-bs-target="#pills-security">
+                                                    data-bs-toggle="pill" data-bs-target="#pills-security"
+                                                    type="button">
                                                     <i class="fa-solid fa-shield-halved me-2"></i> Bảo mật
                                                 </button>
                                             </li>
@@ -146,6 +166,7 @@
 
                                         <div class="tab-content" id="pills-tabContent">
 
+                                            <!-- TAB THÔNG TIN -->
                                             <div class="tab-pane fade show active" id="pills-info">
                                                 <form action="/edit-profile" method="POST">
                                                     <div class="mb-3">
@@ -162,21 +183,26 @@
                                                             <div class="input-group">
                                                                 <input type="text" class="form-control bg-light"
                                                                     value="<%= user.email %>" readonly>
-                                                                <span class="input-group-text bg-white text-success"><i
-                                                                        class="fa-solid fa-circle-check"></i></span>
+                                                                <span class="input-group-text bg-white text-success">
+                                                                    <i class="fa-solid fa-circle-check"></i>
+                                                                </span>
                                                             </div>
                                                         </div>
+
                                                         <div class="col-md-6 mb-3">
                                                             <label class="form-label fw-bold text-secondary">
                                                                 Số điện thoại
                                                                 <% if (user.phone) { %>
-                                                                    <span class="verified-badge"><i
-                                                                            class="fa-solid fa-circle-check"></i> Đã xác
-                                                                        thực</span>
+                                                                    <span class="verified-badge">
+                                                                        <i class="fa-solid fa-circle-check"></i> Đã xác
+                                                                        thực
+                                                                    </span>
                                                                     <% } else { %>
-                                                                        <span class="unverified-badge"><i
+                                                                        <span class="unverified-badge">
+                                                                            <i
                                                                                 class="fa-solid fa-circle-exclamation"></i>
-                                                                            Chưa xác thực</span>
+                                                                            Chưa xác thực
+                                                                        </span>
                                                                         <% } %>
                                                             </label>
                                                             <input type="text" name="phone" class="form-control"
@@ -184,21 +210,51 @@
                                                                 placeholder="Nhập SĐT...">
                                                         </div>
                                                     </div>
+
                                                     <hr class="text-muted my-4">
                                                     <button type="submit"
-                                                        class="btn btn-warning fw-bold px-4 py-2 w-100">Lưu thay
-                                                        đổi</button>
+                                                        class="btn btn-warning fw-bold px-4 py-2 w-100">
+                                                        Lưu thay đổi
+                                                    </button>
                                                 </form>
                                             </div>
 
-                                            <div class="tab-pane fade" id="pills-ticket">
-                                                <div class="text-center py-5 text-muted">
-                                                    <i class="fa-solid fa-ticket fa-3x mb-3 opacity-50"></i>
-                                                    <p>Bạn chưa có vé nào. <a href="#"
-                                                            class="text-decoration-none fw-bold">Mua vé ngay</a></p>
+                                            <!-- TAB VÍ/VÉ THÁNG -->
+                                            <div class="tab-pane fade" id="pills-wallet">
+                                                <div class="row g-3">
+                                                    <div class="col-md-6">
+                                                        <div class="feature-card h-100">
+                                                            
+                                                            <div class="text-muted small mb-3">
+                                                                Xem số dư ví hiện tại, lịch sử giao dịch và vé tháng đã
+                                                                mua.
+                                                            </div>
+                                                            <a href="/passenger/wallet"
+                                                                class="btn btn-outline-primary w-100 fw-bold">
+                                                                Mở trang ví
+                                                            </a>
+                                                        </div>
+                                                    </div>
+
+                                                    <div class="col-md-6">
+                                                        <div class="feature-card h-100">
+
+                                                            <div class="text-muted small mb-3">
+                                                                Chọn tuyến, chọn tháng và thanh toán vé tháng bằng ví
+                                                                BusDN.
+                                                            </div>
+                                                            <a href="/passenger/passes/monthly"
+                                                                class="btn btn-outline-success w-100 fw-bold">
+                                                                Mua vé tháng
+                                                            </a>
+                                                        </div>
+                                                    </div>
+
+
                                                 </div>
                                             </div>
 
+                                            <!-- TAB BẢO MẬT -->
                                             <div class="tab-pane fade" id="pills-security">
                                                 <form action="/change-password" method="POST">
                                                     <div class="mb-3 position-relative">
@@ -257,6 +313,50 @@
                     icon.classList.add("fa-eye");
                 }
             }
+        </script>
+
+        <script>
+            (function () {
+                const walletEl = document.getElementById('walletBalanceText');
+                if (!walletEl) return;
+
+                let isFetching = false;
+
+                async function fetchWalletBalance() {
+                    if (isFetching) return;
+                    isFetching = true;
+                    try {
+                        const res = await fetch('/passenger/wallet/balance', {
+                            method: 'GET',
+                            headers: { 'Accept': 'application/json' },
+                            cache: 'no-store'
+                        });
+                        if (!res.ok) return;
+                        const data = await res.json();
+                        if (!data || !data.ok) return;
+
+                        walletEl.textContent = `${data.walletBalanceText} đ`;
+                        walletEl.style.transform = 'scale(1.03)';
+                        walletEl.style.opacity = '0.95';
+                        setTimeout(() => {
+                            walletEl.style.transform = 'scale(1)';
+                            walletEl.style.opacity = '1';
+                        }, 150);
+                    } catch (e) {
+                    } finally {
+                        isFetching = false;
+                    }
+                }
+
+                fetchWalletBalance();
+                const timer = setInterval(fetchWalletBalance, 5000);
+
+                document.addEventListener('visibilitychange', () => {
+                    if (!document.hidden) fetchWalletBalance();
+                });
+
+                window.addEventListener('beforeunload', () => clearInterval(timer));
+            })();
         </script>
 </body>
 

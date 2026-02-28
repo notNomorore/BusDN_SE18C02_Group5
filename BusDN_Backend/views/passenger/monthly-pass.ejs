@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <%
+      const _title = (typeof title !== 'undefined' && title) ? title : "Mua vé tháng - BusDN";
+    %>
+    <title><%= _title %></title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        body { background: #f4f6f9; font-family: 'Segoe UI', sans-serif; }
+        .page-card { border: 0; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,.04); }
+        .wallet-card {
+            background: linear-gradient(135deg, #0d4f9b 0%, #003f88 100%);
+            color: #fff; border-radius: 18px; padding: 22px;
+            box-shadow: 0 12px 30px rgba(0, 64, 136, .25);
+        }
+        .price-badge {
+            background: #eef4ff;
+            color: #0d53c7;
+            border: 1px solid #d9e6ff;
+            border-radius: 999px;
+            padding: 2px 10px;
+            font-weight: 700;
+            font-size: .85rem;
+        }
+        .badge-soft {
+            background: #eef3ff;
+            color: #214c9e;
+            border: 1px solid #d7e3ff;
+        }
+        .money-out { color: #dc3545; font-weight: 700; }
+        .pass-code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: .9rem;
+        }
+        .route-info-box {
+            background: #f8fbff;
+            border: 1px solid #dce8ff;
+            border-radius: 12px;
+            padding: 12px 14px;
+        }
+    </style>
+</head>
+<body>
+    <%
+      const _user = (typeof user !== 'undefined' && user) ? user : {};
+      const _walletBalance = Number((typeof walletBalance !== 'undefined' ? walletBalance : 0) || 0);
+      const _routes = (typeof routes !== 'undefined' && Array.isArray(routes)) ? routes : [];
+      const _myPasses = (typeof myPasses !== 'undefined' && Array.isArray(myPasses)) ? myPasses : [];
+      const _selectedRouteId = (typeof selectedRouteId !== 'undefined' && selectedRouteId) ? String(selectedRouteId) : "";
+      const _selectedMonth = (typeof selectedMonth !== 'undefined' && selectedMonth) ? Number(selectedMonth) : (new Date().getMonth() + 1);
+      const _selectedYear = (typeof selectedYear !== 'undefined' && selectedYear) ? Number(selectedYear) : (new Date().getFullYear());
+      const _error = (typeof error !== 'undefined') ? error : null;
+      const _success = (typeof success !== 'undefined') ? success : null;
+    %>
+
+    <%- include('../partials/header') %>
+
+    <div class="container my-4 my-lg-5">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <h2 class="fw-bold mb-1">Mua vé tháng</h2>
+                <div class="text-muted">UC15 - Chọn tuyến, trừ tiền ví, cấp thẻ tháng</div>
+            </div>
+            <a href="/passenger/wallet" class="btn btn-outline-secondary">
+                <i class="fa-solid fa-arrow-left me-2"></i> Quay lại ví
+            </a>
+        </div>
+
+        <% if (_error) { %>
+            <div class="alert alert-danger"><%= _error %></div>
+        <% } %>
+        <% if (_success) { %>
+            <div class="alert alert-success"><%= _success %></div>
+        <% } %>
+
+        <div class="row g-4">
+            <!-- LEFT -->
+            <div class="col-lg-4">
+                <div class="wallet-card mb-4">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="opacity-75">Số dư ví hiện tại</div>
+                            <div class="display-6 fw-bold mt-1" id="walletBalanceText">
+                                <%= _walletBalance.toLocaleString("vi-VN") %> đ
+                            </div>
+                            <div class="mt-2"><%= _user?.fullName || "Hành khách" %></div>
+                        </div>
+                        <i class="fa-solid fa-wallet fa-2x opacity-75"></i>
+                    </div>
+                </div>
+
+                <div class="card page-card mb-4">
+                    <div class="card-body">
+                        <h5 class="fw-bold mb-3">Hướng dẫn mua vé tháng</h5>
+                        <ul class="mb-0">
+                            <li>Chọn tuyến xe đang hoạt động</li>
+                            <li>Chọn tháng / năm cần mua</li>
+                            <li>Hệ thống sẽ trừ tiền trực tiếp từ ví BusDN</li>
+                            <li>Không thể mua lại cùng tuyến nếu đã đăng ký trước đó</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="card page-card">
+                    <div class="card-body">
+                        <h5 class="fw-bold mb-3">Vé tháng gần đây</h5>
+                        <% if (_myPasses.length === 0) { %>
+                            <div class="text-muted">Bạn chưa có vé tháng nào.</div>
+                        <% } else { %>
+                            <div class="list-group list-group-flush">
+                                <% _myPasses.slice(0,5).forEach(pass => { %>
+                                    <div class="list-group-item px-0">
+                                        <div class="fw-semibold">
+                                            <%= pass.displayRouteNumber ? `${pass.displayRouteNumber} - ${pass.displayRouteName}` : pass.displayRouteName %>
+                                        </div>
+                                        <div class="small text-muted">
+                                            Mã thẻ: <span class="pass-code"><%= pass.passCode %></span>
+                                        </div>
+                                        <div class="small text-muted">
+                                            Tháng <%= String(pass.month).padStart(2,'0') %>/<%= pass.year %> ·
+                                            <%= Number(pass.pricePaid || 0).toLocaleString("vi-VN") %> đ
+                                        </div>
+                                        <div class="mt-1">
+                                            <span class="badge <%= pass.status === 'ACTIVE' ? 'text-bg-success' : (pass.status === 'EXPIRED' ? 'text-bg-secondary' : 'text-bg-danger') %>">
+                                                <%= pass.status %>
+                                            </span>
+                                        </div>
+                                    </div>
+                                <% }) %>
+                            </div>
+                        <% } %>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT -->
+            <div class="col-lg-8">
+                <div class="card page-card mb-4">
+                    <div class="card-body">
+                        <h5 class="fw-bold mb-3">Đăng ký mua vé tháng</h5>
+
+                        <% if (_routes.length === 0) { %>
+                            <div class="alert alert-warning mb-0">
+                                Hiện chưa có tuyến nào đang hoạt động để mua vé tháng.
+                            </div>
+                        <% } else { %>
+                            <form method="POST" action="/passenger/passes/monthly/purchase" id="monthlyPassForm">
+                                <!-- Chọn tuyến dạng dropdown -->
+                                <div class="mb-3">
+                                    <label class="form-label fw-semibold">1) Chọn tuyến</label>
+                                    <select class="form-select" name="routeId" id="routeSelect" required>
+                                        <option value="">-- Chọn tuyến xe --</option>
+                                        <% _routes.forEach(r => { %>
+                                            <option
+                                                value="<%= r._id %>"
+                                                data-route-number="<%= r.routeNumber %>"
+                                                data-route-name="<%= r.name %>"
+                                                data-price="<%= Number(r.monthlyPassPrice || 0) %>"
+                                                data-description="<%= r.description || 'Tuyến xe BusDN' %>"
+                                                data-start="<%= r.operationTime?.start || '' %>"
+                                                data-end="<%= r.operationTime?.end || '' %>"
+                                                <%= _selectedRouteId === String(r._id) ? 'selected' : '' %>>
+                                                <%= r.routeNumber %> - <%= r.name %> · <%= Number(r.monthlyPassPrice || 0).toLocaleString("vi-VN") %> đ
+                                            </option>
+                                        <% }) %>
+                                    </select>
+                                </div>
+
+                                <div class="route-info-box mb-3" id="routeInfoBox">
+                                    <div class="fw-semibold mb-1" id="routeInfoTitle">Chưa chọn tuyến</div>
+                                    <div class="small text-muted" id="routeInfoDesc">Vui lòng chọn tuyến trong danh sách dropdown.</div>
+                                    <div class="small text-muted mt-1" id="routeInfoTime"></div>
+                                </div>
+
+                                <!-- Tháng/Năm -->
+                                <div class="row g-3 mb-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-semibold">2) Tháng</label>
+                                        <select class="form-select" name="month" id="monthInput" required>
+                                            <% for (let m = 1; m <= 12; m++) { %>
+                                                <option value="<%= m %>" <%= Number(_selectedMonth) === m ? 'selected' : '' %>>
+                                                    Tháng <%= String(m).padStart(2, '0') %>
+                                                </option>
+                                            <% } %>
+                                        </select>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-semibold">3) Năm</label>
+                                        <select class="form-select" name="year" id="yearInput" required>
+                                            <%
+                                                const currentYear = new Date().getFullYear();
+                                                for (let y = currentYear - 1; y <= currentYear + 2; y++) {
+                                            %>
+                                                <option value="<%= y %>" <%= Number(_selectedYear) === y ? 'selected' : '' %>>
+                                                    <%= y %>
+                                                </option>
+                                            <% } %>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <!-- Summary -->
+                                <div class="border rounded-3 p-3 mb-3 bg-light">
+                                    <div class="fw-semibold mb-2">Thông tin thanh toán</div>
+                                    <div class="small text-muted mb-2">Thanh toán bằng số dư ví BusDN</div>
+
+                                    <div class="d-flex justify-content-between">
+                                        <span>Tuyến đã chọn</span>
+                                        <span class="fw-semibold" id="selectedRouteText">Chưa chọn tuyến</span>
+                                    </div>
+                                    <div class="d-flex justify-content-between">
+                                        <span>Kỳ vé tháng</span>
+                                        <span class="fw-semibold" id="selectedPeriodText">
+                                            <%= String(_selectedMonth).padStart(2,'0') %>/<%= _selectedYear %>
+                                        </span>
+                                    </div>
+                                    <div class="d-flex justify-content-between mt-2 pt-2 border-top">
+                                        <span class="fw-semibold">Giá vé tháng</span>
+                                        <span class="fw-bold text-primary" id="selectedPriceText">0 đ</span>
+                                    </div>
+                                    <div class="d-flex justify-content-between">
+                                        <span>Số dư ví hiện tại</span>
+                                        <span class="fw-semibold" id="summaryWalletBalance">
+                                            <%= _walletBalance.toLocaleString("vi-VN") %> đ
+                                        </span>
+                                    </div>
+                                    <div class="d-flex justify-content-between">
+                                        <span>Số dư còn lại (ước tính)</span>
+                                        <span class="fw-semibold" id="remainingBalanceText">
+                                            <%= _walletBalance.toLocaleString("vi-VN") %> đ
+                                        </span>
+                                    </div>
+                                    <div class="small mt-2" id="walletStatusHint"></div>
+                                </div>
+
+                                <button type="submit" class="btn btn-primary w-100 fw-bold" id="buyBtn">
+                                    <i class="fa-solid fa-ticket me-2"></i> Mua vé tháng bằng ví
+                                </button>
+                            </form>
+                        <% } %>
+                    </div>
+                </div>
+
+                <div class="card page-card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="fw-bold mb-0">Danh sách vé tháng của tôi</h5>
+                            <span class="badge badge-soft rounded-pill">Tối đa 20 vé gần nhất</span>
+                        </div>
+
+                        <% if (_myPasses.length === 0) { %>
+                            <div class="text-center py-5 text-muted">
+                                <i class="fa-solid fa-ticket fa-2x mb-3 opacity-50"></i>
+                                <div>Chưa có vé tháng nào.</div>
+                            </div>
+                        <% } else { %>
+                            <div class="table-responsive">
+                                <table class="table align-middle">
+                                    <thead>
+                                        <tr>
+                                            <th>Mã thẻ</th>
+                                            <th>Tuyến</th>
+                                            <th>Kỳ vé</th>
+                                            <th>Giá</th>
+                                            <th>Trạng thái</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <% _myPasses.forEach(pass => { %>
+                                            <tr>
+                                                <td class="pass-code"><%= pass.passCode %></td>
+                                                <td>
+                                                    <div class="fw-semibold">
+                                                        <%= pass.displayRouteNumber ? `${pass.displayRouteNumber} - ${pass.displayRouteName}` : pass.displayRouteName %>
+                                                    </div>
+                                                </td>
+                                                <td>
+                                                    <div class="fw-semibold">
+                                                        <%= String(pass.month).padStart(2, '0') %>/<%= pass.year %>
+                                                    </div>
+                                                    <small class="text-muted">
+                                                        <%= pass.validFrom ? new Date(pass.validFrom).toLocaleDateString("vi-VN") : "-" %> -
+                                                        <%= pass.validTo ? new Date(pass.validTo).toLocaleDateString("vi-VN") : "-" %>
+                                                    </small>
+                                                </td>
+                                                <td class="money-out">
+                                                    - <%= Number(pass.pricePaid || 0).toLocaleString("vi-VN") %> đ
+                                                </td>
+                                                <td>
+                                                    <span class="badge <%= pass.status === 'ACTIVE' ? 'text-bg-success' : (pass.status === 'EXPIRED' ? 'text-bg-secondary' : 'text-bg-danger') %>">
+                                                        <%= pass.status %>
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        <% }) %>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <% } %>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            let currentWalletBalance = Number(<%- JSON.stringify(_walletBalance) %>);
+            const routeSelect = document.getElementById("routeSelect");
+            const monthInput = document.getElementById("monthInput");
+            const yearInput = document.getElementById("yearInput");
+            const selectedRouteText = document.getElementById("selectedRouteText");
+            const selectedPeriodText = document.getElementById("selectedPeriodText");
+            const selectedPriceText = document.getElementById("selectedPriceText");
+            const remainingBalanceText = document.getElementById("remainingBalanceText");
+            const walletStatusHint = document.getElementById("walletStatusHint");
+            const buyBtn = document.getElementById("buyBtn");
+            const form = document.getElementById("monthlyPassForm");
+
+            const routeInfoTitle = document.getElementById("routeInfoTitle");
+            const routeInfoDesc = document.getElementById("routeInfoDesc");
+            const routeInfoTime = document.getElementById("routeInfoTime");
+
+            if (!form) return;
+
+            function fmt(v) {
+                return Number(v || 0).toLocaleString("vi-VN") + " đ";
+            }
+
+            function getSelectedOption() {
+                if (!routeSelect) return null;
+                const opt = routeSelect.options[routeSelect.selectedIndex];
+                if (!opt || !opt.value) return null;
+                return opt;
+            }
+
+            function updateSummary() {
+                const selected = getSelectedOption();
+                const month = monthInput ? monthInput.value : "";
+                const year = yearInput ? yearInput.value : "";
+
+                if (selectedPeriodText) {
+                    selectedPeriodText.textContent = `${String(month).padStart(2, "0")}/${year}`;
+                }
+
+                if (!selected) {
+                    if (selectedRouteText) selectedRouteText.textContent = "Chưa chọn tuyến";
+                    if (selectedPriceText) selectedPriceText.textContent = fmt(0);
+                    if (remainingBalanceText) remainingBalanceText.textContent = fmt(currentWalletBalance);
+                    if (walletStatusHint) {
+                        walletStatusHint.innerHTML = `<span class="text-muted">Vui lòng chọn tuyến để xem giá.</span>`;
+                    }
+                    if (routeInfoTitle) routeInfoTitle.textContent = "Chưa chọn tuyến";
+                    if (routeInfoDesc) routeInfoDesc.textContent = "Vui lòng chọn tuyến trong danh sách dropdown.";
+                    if (routeInfoTime) routeInfoTime.textContent = "";
+                    if (buyBtn) buyBtn.disabled = false;
+                    return;
+                }
+
+                const routeNumber = selected.dataset.routeNumber || "";
+                const routeName = selected.dataset.routeName || "";
+                const description = selected.dataset.description || "Tuyến xe BusDN";
+                const start = selected.dataset.start || "";
+                const end = selected.dataset.end || "";
+                const price = Number(selected.dataset.price || 0);
+
+                if (selectedRouteText) selectedRouteText.textContent = `${routeNumber} - ${routeName}`;
+                if (selectedPriceText) selectedPriceText.textContent = fmt(price);
+
+                if (routeInfoTitle) routeInfoTitle.textContent = `${routeNumber} - ${routeName}`;
+                if (routeInfoDesc) routeInfoDesc.textContent = description;
+                if (routeInfoTime) {
+                    routeInfoTime.textContent = (start && end) ? `Giờ hoạt động: ${start} - ${end}` : "";
+                }
+
+                const remain = currentWalletBalance - price;
+                if (remainingBalanceText) remainingBalanceText.textContent = fmt(Math.max(remain, 0));
+
+                if (walletStatusHint) {
+                    if (remain < 0) {
+                        walletStatusHint.innerHTML = `<span class="text-danger fw-semibold">Số dư ví không đủ để mua vé tháng này.</span>`;
+                    } else {
+                        walletStatusHint.innerHTML = `<span class="text-success fw-semibold">Số dư đủ để thanh toán.</span>`;
+                    }
+                }
+            }
+
+            if (routeSelect) routeSelect.addEventListener("change", updateSummary);
+            if (monthInput) monthInput.addEventListener("change", updateSummary);
+            if (yearInput) yearInput.addEventListener("change", updateSummary);
+
+            form.addEventListener("submit", function (e) {
+                const selected = getSelectedOption();
+
+                if (!selected || !selected.value) {
+                    e.preventDefault();
+                    alert("Vui lòng chọn tuyến xe.");
+                    return;
+                }
+
+                const price = Number(selected.dataset.price || 0);
+                const month = monthInput ? monthInput.value : "";
+                const year = yearInput ? yearInput.value : "";
+                const routeText = `${selected.dataset.routeNumber} - ${selected.dataset.routeName}`;
+
+                if (currentWalletBalance < price) {
+                    e.preventDefault();
+                    alert("Số dư ví không đủ. Vui lòng nạp thêm tiền.");
+                    return;
+                }
+
+                const ok = confirm(
+                    `Xác nhận mua vé tháng?\n\n` +
+                    `Tuyến: ${routeText}\n` +
+                    `Kỳ vé: ${String(month).padStart(2,"0")}/${year}\n` +
+                    `Giá: ${fmt(price)}\n` +
+                    `Thanh toán bằng ví BusDN`
+                );
+                if (!ok) e.preventDefault();
+            });
+
+            updateSummary();
+
+            async function refreshWalletBalance() {
+                try {
+                    const res = await fetch("/passenger/wallet/balance", {
+                        headers: { "Accept": "application/json" },
+                        cache: "no-store"
+                    });
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    if (!data.ok) return;
+
+                    if (typeof data.walletBalance === "number") {
+                        currentWalletBalance = Number(data.walletBalance || 0);
+                    }
+
+                    const walletText = data.walletBalanceText || currentWalletBalance.toLocaleString("vi-VN");
+
+                    const el = document.getElementById("walletBalanceText");
+                    if (el) el.textContent = `${walletText} đ`;
+
+                    const summaryEl = document.getElementById("summaryWalletBalance");
+                    if (summaryEl) summaryEl.textContent = `${walletText} đ`;
+
+                    updateSummary();
+                } catch (e) {}
+            }
+
+            refreshWalletBalance();
+            setInterval(refreshWalletBalance, 5000);
+        })();
+    </script>
+</body>
+</html>

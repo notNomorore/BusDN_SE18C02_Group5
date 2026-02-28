@@ -1,0 +1,316 @@
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<%
+const stopList = Array.isArray(stops) ? stops : [];
+const currentFilters = filters || {};
+const currentQ = currentFilters.q || '';
+const currentStatus = currentFilters.status || '';
+
+const normalizeStatus = (status) => {
+  if (status === 'ACTIVE') return 'ACTIVE';
+  if (status === 'INACTIVE') return 'INACTIVE';
+  return 'UNKNOWN';
+};
+
+const badgeClass = (status) => {
+  const s = normalizeStatus(status);
+  if (s === 'ACTIVE') return 'bg-success';
+  if (s === 'INACTIVE') return 'bg-secondary';
+  return 'bg-warning text-dark';
+};
+
+const badgeText = (status) => {
+  const s = normalizeStatus(status);
+  if (s === 'ACTIVE') return 'Đang hoạt động';
+  if (s === 'INACTIVE') return 'Tạm ngưng';
+  return 'Chưa có trạng thái';
+};
+
+const safe = (v) => (v === null || v === undefined) ? '' : v;
+%>
+
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <h2 class="mb-0">Quản lý Trạm dừng</h2>
+
+    <div class="d-flex gap-2">
+        <a href="/admin/routes" class="btn btn-outline-secondary">
+            <i class="fas fa-road"></i> Quản lý Tuyến
+        </a>
+
+        <button type="button"
+                class="btn btn-primary"
+                data-bs-toggle="modal"
+                data-bs-target="#createStopModal">
+            <i class="fas fa-plus"></i> Thêm Trạm Mới
+        </button>
+    </div>
+</div>
+
+<% if (success) { %>
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+    <%= success %>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+<% } %>
+
+<% if (error) { %>
+<div class="alert alert-danger alert-dismissible fade show" role="alert">
+    <%= error %>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+<% } %>
+
+<div class="card shadow-sm mb-3">
+    <div class="card-body">
+        <form method="GET" action="/admin/stops">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-6">
+                    <label class="form-label">Tìm trạm</label>
+                    <input type="text"
+                           name="q"
+                           class="form-control"
+                           placeholder="Nhập tên trạm hoặc địa chỉ..."
+                           value="<%= currentQ %>">
+                </div>
+
+                <div class="col-md-3">
+                    <label class="form-label">Trạng thái</label>
+                    <select name="status" class="form-select">
+                        <option value="">Tất cả</option>
+                        <option value="ACTIVE" <%= currentStatus === 'ACTIVE' ? 'selected' : '' %>>Đang hoạt động</option>
+                        <option value="INACTIVE" <%= currentStatus === 'INACTIVE' ? 'selected' : '' %>>Tạm ngưng</option>
+                    </select>
+                </div>
+
+                <div class="col-md-3 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fas fa-search"></i> Lọc
+                    </button>
+                    <a href="/admin/stops" class="btn btn-light border w-100">Đặt lại</a>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Tên trạm</th>
+                        <th>Địa chỉ</th>
+                        <th>Tọa độ</th>
+                        <th>Điểm đầu/cuối</th>
+                        <th>Trạng thái</th>
+                        <th>Hành động</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% if (!stopList.length) { %>
+                    <tr>
+                        <td colspan="6" class="text-center text-muted py-4">
+                            Chưa có trạm dừng nào trong hệ thống.
+                        </td>
+                    </tr>
+                    <% } %>
+
+                    <% stopList.forEach((stop, idx) => { %>
+                    <tr>
+                        <td><strong><%= safe(stop.name) %></strong></td>
+                        <td><%= safe(stop.address) || '-' %></td>
+                        <td><%= safe(stop.lat) %>, <%= safe(stop.lng) %></td>
+                        <td>
+                            <% if (stop.isTerminal) { %>
+                                <span class="badge bg-info text-dark">Có</span>
+                            <% } else { %>
+                                <span class="text-muted">Không</span>
+                            <% } %>
+                        </td>
+                        <td>
+                            <span class="badge <%= badgeClass(stop.status) %>">
+                                <%= badgeText(stop.status) %>
+                            </span>
+                        </td>
+                        <td class="text-nowrap">
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-primary"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#editStopModal-<%= idx %>"
+                                    title="Chỉnh sửa">
+                                <i class="fas fa-edit"></i>
+                            </button>
+
+                            <% if (stop.status === 'ACTIVE') { %>
+                            <form action="/admin/stops/<%= stop._id %>/deactivate"
+                                  method="POST"
+                                  class="d-inline js-confirm-form"
+                                  data-confirm-title="Tạm ngưng trạm <%= safe(stop.name) %>?"
+                                  data-confirm-text="Trạm sẽ không còn được chọn cho cấu hình tuyến mới."
+                                  data-confirm-icon="warning"
+                                  data-confirm-button="Xác nhận tạm ngưng"
+                                  data-cancel-button="Hủy">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Tạm ngưng">
+                                    <i class="fas fa-ban"></i>
+                                </button>
+                            </form>
+                            <% } else { %>
+                            <form action="/admin/stops/<%= stop._id %>/activate"
+                                  method="POST"
+                                  class="d-inline js-confirm-form"
+                                  data-confirm-title="Kích hoạt lại trạm <%= safe(stop.name) %>?"
+                                  data-confirm-text="Trạm sẽ có thể được sử dụng lại."
+                                  data-confirm-icon="question"
+                                  data-confirm-button="Kích hoạt lại"
+                                  data-cancel-button="Hủy">
+                                <button type="submit" class="btn btn-sm btn-outline-success" title="Kích hoạt lại">
+                                    <i class="fas fa-rotate-left"></i>
+                                </button>
+                            </form>
+                            <% } %>
+                        </td>
+                    </tr>
+                    <% }) %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- CREATE STOP MODAL -->
+<div class="modal fade" id="createStopModal" tabindex="-1" aria-labelledby="createStopModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form action="/admin/stops/create" method="POST">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="createStopModalLabel">Thêm Trạm Mới</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+                </div>
+
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Tên trạm *</label>
+                            <input type="text" name="name" class="form-control" required>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label">Địa chỉ</label>
+                            <input type="text" name="address" class="form-control">
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Vĩ độ (lat) *</label>
+                            <input type="number" step="any" name="lat" class="form-control" required>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Kinh độ (lng) *</label>
+                            <input type="number" step="any" name="lng" class="form-control" required>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Trạng thái</label>
+                            <select class="form-select" name="status">
+                                <option value="ACTIVE" selected>Đang hoạt động</option>
+                                <option value="INACTIVE">Tạm ngưng</option>
+                            </select>
+                        </div>
+
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="isTerminal" id="createIsTerminal">
+                                <label class="form-check-label" for="createIsTerminal">
+                                    Là điểm đầu / cuối tuyến
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+                    <button type="submit" class="btn btn-primary">Tạo trạm</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- EDIT STOP MODALS -->
+<% stopList.forEach((stop, idx) => { %>
+<div class="modal fade"
+     id="editStopModal-<%= idx %>"
+     tabindex="-1"
+     aria-labelledby="editStopModalLabel-<%= idx %>"
+     aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form action="/admin/stops/<%= stop._id %>/update" method="POST">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editStopModalLabel-<%= idx %>">
+                        Chỉnh sửa trạm - <%= safe(stop.name) %>
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+                </div>
+
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Tên trạm *</label>
+                            <input type="text" name="name" class="form-control" value="<%= safe(stop.name) %>" required>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label">Địa chỉ</label>
+                            <input type="text" name="address" class="form-control" value="<%= safe(stop.address) %>">
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Vĩ độ (lat) *</label>
+                            <input type="number" step="any" name="lat" class="form-control" value="<%= safe(stop.lat) %>" required>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Kinh độ (lng) *</label>
+                            <input type="number" step="any" name="lng" class="form-control" value="<%= safe(stop.lng) %>" required>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Trạng thái</label>
+                            <select class="form-select" name="status">
+                                <option value="ACTIVE" <%= stop.status === 'ACTIVE' ? 'selected' : '' %>>Đang hoạt động</option>
+                                <option value="INACTIVE" <%= stop.status === 'INACTIVE' ? 'selected' : '' %>>Tạm ngưng</option>
+                            </select>
+                        </div>
+
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       name="isTerminal"
+                                       id="editIsTerminal-<%= idx %>"
+                                       <%= stop.isTerminal ? 'checked' : '' %>>
+                                <label class="form-check-label" for="editIsTerminal-<%= idx %>">
+                                    Là điểm đầu / cuối tuyến
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+                    <button type="submit" class="btn btn-primary">Lưu thay đổi</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<% }) %>

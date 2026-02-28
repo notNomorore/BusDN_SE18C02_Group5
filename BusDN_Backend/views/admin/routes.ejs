@@ -1,59 +1,490 @@
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2>Quản lý Tuyến xe (Network)</h2>
-    <button class="btn btn-primary"><i class="fas fa-plus"></i> Thêm Tuyến Mới</button>
-</div>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 
-<div class="card shadow-sm">
-    <div class="card-body">
-        <table class="table table-hover align-middle">
-            <thead class="table-light">
-                <tr>
-                    <th>Số hiệu</th>
-                    <th>Tên tuyến</th>
-                    <th>Cự ly</th>
-                    <th>Giờ hoạt động</th>
-                    <th>Trạng thái</th>
-                    <th>Hành động</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td><span class="badge bg-primary fs-6">R16</span></td>
-                    <td><strong>Kim Liên - CĐ Việt Hàn</strong><br><small class="text-muted">Qua: ĐH Bách Khoa, Cầu Rồng, FPT</small></td>
-                    <td>30.5 km</td>
-                    <td>05:30 - 21:00</td>
-                    <td><span class="badge bg-success">Đang hoạt động</span></td>
-                    <td>
-                        <button class="btn btn-sm btn-outline-primary"><i class="fas fa-edit"></i></button>
-                        <button class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></button>
-                        <button class="btn btn-sm btn-outline-info" title="Xem trạm dừng"><i class="fas fa-map-marker-alt"></i></button>
-                    </td>
-                </tr>
-                <tr>
-                    <td><span class="badge bg-primary fs-6">R05</span></td>
-                    <td><strong>Công viên 29/3 - Vũng Thùng</strong><br><small class="text-muted">Qua: BV Đà Nẵng, BigC</small></td>
-                    <td>15.2 km</td>
-                    <td>05:00 - 19:00</td>
-                    <td><span class="badge bg-success">Đang hoạt động</span></td>
-                    <td>
-                        <button class="btn btn-sm btn-outline-primary"><i class="fas fa-edit"></i></button>
-                        <button class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></button>
-                        <button class="btn btn-sm btn-outline-info"><i class="fas fa-map-marker-alt"></i></button>
-                    </td>
-                </tr>
-                <tr>
-                    <td><span class="badge bg-secondary fs-6">T01</span></td>
-                    <td><strong>Đà Nẵng - Hội An (Bus Tiamo)</strong></td>
-                    <td>35 km</td>
-                    <td>-</td>
-                    <td><span class="badge bg-secondary">Tạm ngưng</span></td>
-                    <td>
-                        <button class="btn btn-sm btn-outline-primary"><i class="fas fa-edit"></i></button>
-                        <button class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></button>
-                        <button class="btn btn-sm btn-outline-info"><i class="fas fa-map-marker-alt"></i></button>
-                    </td>
-                </tr>
-            </tbody>
-        </table>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<% const routeList=Array.isArray(routes) ? routes : []; const currentFilters=filters || {}; const
+    currentQ=currentFilters.q || '' ; const currentStatus=currentFilters.status || '' ; const normalizeStatus=(status)=>
+    {
+    if (status === 'ACTIVE') return 'ACTIVE';
+    if (status === 'INACTIVE') return 'INACTIVE';
+    return 'UNKNOWN';
+    };
+
+    const badgeClass = (status) => {
+    const s = normalizeStatus(status);
+    if (s === 'ACTIVE') return 'bg-success';
+    if (s === 'INACTIVE') return 'bg-secondary';
+    return 'bg-warning text-dark';
+    };
+
+    const badgeText = (status) => {
+    const s = normalizeStatus(status);
+    if (s === 'ACTIVE') return 'Đang hoạt động';
+    if (s === 'INACTIVE') return 'Tạm ngưng';
+    return 'Chưa có trạng thái';
+    };
+
+    const codeBadgeClass = (status) => {
+    const s = normalizeStatus(status);
+    if (s === 'ACTIVE') return 'bg-primary';
+    if (s === 'INACTIVE') return 'bg-secondary';
+    return 'bg-warning text-dark';
+    };
+
+    const fmtDistance = (v) => (v || v === 0) ? `${v} km` : '-';
+
+    const fmtMoney = (v) => {
+    if (v === null || v === undefined || v === '') return '-';
+    return Number(v).toLocaleString('vi-VN') + ' đ';
+    };
+
+    const fmtOpTime = (r) => {
+    const s = r && r.operationTime && r.operationTime.start ? r.operationTime.start : '';
+    const e = r && r.operationTime && r.operationTime.end ? r.operationTime.end : '';
+    return (s && e) ? `${s} - ${e}` : '-';
+    };
+
+    const timeValue = (r, key) => (r && r.operationTime && r.operationTime[key]) ? r.operationTime[key] : '';
+    const safe = (v) => (v === null || v === undefined) ? '' : v;
+    const valueOrDefault = (v, d) => (v === null || v === undefined || v === '') ? d : v;
+    %>
+
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <h2 class="mb-0">Quản lý Tuyến xe (Network)</h2>
+
+        <div class="d-flex gap-2">
+            <a href="/admin/stops" class="btn btn-outline-info">
+                <i class="fas fa-map-marker-alt"></i> Quản lý Trạm dừng
+            </a>
+
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createRouteModal">
+                <i class="fas fa-plus"></i> Thêm Tuyến Mới
+            </button>
+        </div>
     </div>
-</div>
+
+    <% if (success) { %>
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <%= success %>
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        <% } %>
+
+            <% if (error) { %>
+                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    <%= error %>
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+                <% } %>
+
+                    <div class="card shadow-sm mb-3">
+                        <div class="card-body">
+                            <form method="GET" action="/admin/routes">
+                                <div class="row g-3 align-items-end">
+                                    <div class="col-md-6">
+                                        <label class="form-label">Tìm tuyến</label>
+                                        <input type="text" name="q" class="form-control"
+                                            placeholder="Nhập mã tuyến, tên tuyến hoặc mô tả..."
+                                            value="<%= currentQ %>">
+                                    </div>
+
+                                    <div class="col-md-3">
+                                        <label class="form-label">Trạng thái</label>
+                                        <select name="status" class="form-select">
+                                            <option value="">Tất cả</option>
+                                            <option value="ACTIVE" <%=currentStatus==='ACTIVE' ? 'selected' : '' %>>
+                                                Đang hoạt động
+                                            </option>
+                                            <option value="INACTIVE" <%=currentStatus==='INACTIVE' ? 'selected' : '' %>>
+                                                Tạm ngưng
+                                            </option>
+                                        </select>
+                                    </div>
+
+                                    <div class="col-md-3 d-flex gap-2">
+                                        <button type="submit" class="btn btn-primary w-100">
+                                            <i class="fas fa-search"></i> Lọc
+                                        </button>
+                                        <a href="/admin/routes" class="btn btn-light border w-100">
+                                            Đặt lại
+                                        </a>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div class="card shadow-sm">
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-hover align-middle">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Số hiệu</th>
+                                            <th>Tên tuyến</th>
+                                            <th>Cự ly</th>
+                                            <th>Giờ hoạt động</th>
+                                            <th>Giá vé tháng</th>
+                                            <th>Trạng thái</th>
+                                            <th>Hành động</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <% if (!routeList.length) { %>
+                                            <tr>
+                                                <td colspan="7" class="text-center text-muted py-4">
+                                                    Chưa có tuyến nào trong hệ thống.
+                                                </td>
+                                            </tr>
+                                            <% } %>
+
+                                                <% routeList.forEach((route, idx)=> { %>
+                                                    <tr>
+                                                        <td>
+                                                            <span
+                                                                class="badge <%= codeBadgeClass(route.status) %> fs-6">
+                                                                <%= safe(route.routeNumber) %>
+                                                            </span>
+                                                        </td>
+
+                                                        <td>
+                                                            <strong>
+                                                                <%= safe(route.name) %>
+                                                            </strong>
+                                                            <% if (route.description) { %>
+                                                                <br>
+                                                                <small class="text-muted">
+                                                                    <%= route.description %>
+                                                                </small>
+                                                                <% } %>
+                                                        </td>
+
+                                                        <td>
+                                                            <%= fmtDistance(route.distance) %>
+                                                        </td>
+                                                        <td>
+                                                            <%= fmtOpTime(route) %>
+                                                        </td>
+                                                        <td>
+                                                            <%= fmtMoney(route.monthlyPassPrice) %>
+                                                        </td>
+
+                                                        <td>
+                                                            <span class="badge <%= badgeClass(route.status) %>">
+                                                                <%= badgeText(route.status) %>
+                                                            </span>
+                                                        </td>
+
+                                                        <td class="text-nowrap">
+                                                            <!-- Nút xem chi tiết -->
+                                                            <button type="button" class="btn btn-sm btn-outline-info"
+                                                                data-bs-toggle="modal"
+                                                                data-bs-target="#detailRouteModal-<%= idx %>"
+                                                                title="Xem chi tiết">
+                                                                <i class="fas fa-eye"></i>
+                                                            </button>
+
+                                                            <!-- Nút sửa -->
+                                                            <button type="button" class="btn btn-sm btn-outline-primary"
+                                                                data-bs-toggle="modal"
+                                                                data-bs-target="#editRouteModal-<%= idx %>"
+                                                                title="Chỉnh sửa">
+                                                                <i class="fas fa-edit"></i>
+                                                            </button>
+
+                                                            <!-- ACTIVE => cho tạm ngưng -->
+                                                            <% if (route.status==='ACTIVE' ) { %>
+                                                                <form action="/admin/routes/<%= route._id %>/deactivate"
+                                                                    method="POST" class="d-inline js-confirm-form"
+                                                                    data-confirm-title="Tạm ngưng tuyến <%= safe(route.routeNumber) %>?"
+                                                                    data-confirm-text="Sau khi tạm ngưng, tuyến sẽ không thể dùng để điều phối lịch mới cho đến khi kích hoạt lại."
+                                                                    data-confirm-icon="warning"
+                                                                    data-confirm-button="Xác nhận tạm ngưng"
+                                                                    data-cancel-button="Hủy">
+                                                                    <button type="submit"
+                                                                        class="btn btn-sm btn-outline-danger"
+                                                                        title="Tạm ngưng">
+                                                                        <i class="fas fa-ban"></i>
+                                                                    </button>
+                                                                </form>
+                                                                <% } else if (route.status==='INACTIVE' ) { %>
+                                                                    <!-- INACTIVE => cho kích hoạt lại -->
+                                                                    <form
+                                                                        action="/admin/routes/<%= route._id %>/activate"
+                                                                        method="POST" class="d-inline js-confirm-form"
+                                                                        data-confirm-title="Kích hoạt lại tuyến <%= safe(route.routeNumber) %>?"
+                                                                        data-confirm-text="Tuyến sẽ được phép sử dụng lại trong điều phối lịch."
+                                                                        data-confirm-icon="question"
+                                                                        data-confirm-button="Kích hoạt lại"
+                                                                        data-cancel-button="Hủy">
+                                                                        <button type="submit"
+                                                                            class="btn btn-sm btn-outline-success"
+                                                                            title="Kích hoạt lại">
+                                                                            <i class="fas fa-rotate-left"></i>
+                                                                        </button>
+                                                                    </form>
+                                                                    <% } else { %>
+                                                                        <button type="button"
+                                                                            class="btn btn-sm btn-outline-secondary"
+                                                                            title="Tuyến chưa có trạng thái hợp lệ"
+                                                                            disabled>
+                                                                            <i class="fas fa-question"></i>
+                                                                        </button>
+                                                                        <% } %>
+                                                        </td>
+                                                    </tr>
+                                                    <% }) %>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ================= CREATE MODAL (UC33) ================= -->
+                    <div class="modal fade" id="createRouteModal" tabindex="-1" aria-labelledby="createRouteModalLabel"
+                        aria-hidden="true">
+                        <div class="modal-dialog modal-lg">
+                            <div class="modal-content">
+                                <form action="/admin/routes/create" method="POST">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title" id="createRouteModalLabel">Thêm Tuyến Mới</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal"
+                                            aria-label="Đóng"></button>
+                                    </div>
+
+                                    <div class="modal-body">
+                                        <div class="row g-3">
+                                            <div class="col-md-4">
+                                                <label class="form-label">Mã tuyến *</label>
+                                                <input type="text" name="routeNumber" class="form-control"
+                                                    placeholder="VD: R01" required>
+                                            </div>
+
+                                            <div class="col-md-8">
+                                                <label class="form-label">Tên tuyến *</label>
+                                                <input type="text" name="name" class="form-control"
+                                                    placeholder="VD: Bến xe - Trung tâm" required>
+                                            </div>
+
+                                            <div class="col-md-4">
+                                                <label class="form-label">Cự ly (km) *</label>
+                                                <input type="number" step="0.1" min="0.1" name="distance"
+                                                    class="form-control" placeholder="VD: 12.5" required>
+                                            </div>
+
+                                            <div class="col-md-4">
+                                                <label class="form-label">Giờ bắt đầu</label>
+                                                <input type="time" name="startTime" class="form-control">
+                                            </div>
+
+                                            <div class="col-md-4">
+                                                <label class="form-label">Giờ kết thúc</label>
+                                                <input type="time" name="endTime" class="form-control">
+                                            </div>
+
+                                            <div class="col-md-4">
+                                                <label class="form-label">Trạng thái</label>
+                                                <select class="form-select" name="status">
+                                                    <option value="ACTIVE" selected>Đang hoạt động</option>
+                                                    <option value="INACTIVE">Tạm ngưng</option>
+                                                </select>
+                                            </div>
+
+                                            <div class="col-md-4">
+                                                <label class="form-label">Giá vé tháng</label>
+                                                <input type="number" step="1000" min="0" name="monthlyPassPrice"
+                                                    class="form-control" placeholder="VD: 200000" value="200000">
+                                            </div>
+
+                                            <div class="col-12">
+                                                <label class="form-label">Mô tả</label>
+                                                <textarea name="description" rows="3" class="form-control"
+                                                    placeholder="VD: ĐH Bách Khoa, Cầu Rồng, FPT"></textarea>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+                                        <button type="submit" class="btn btn-primary">Tạo tuyến</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ================= DETAIL MODALS ================= -->
+                    <% routeList.forEach((route, idx)=> { %>
+                        <div class="modal fade" id="detailRouteModal-<%= idx %>" tabindex="-1"
+                            aria-labelledby="detailRouteModalLabel-<%= idx %>" aria-hidden="true">
+                            <div class="modal-dialog modal-lg">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title" id="detailRouteModalLabel-<%= idx %>">
+                                            Chi tiết tuyến - <%= safe(route.routeNumber) %>
+                                        </h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal"
+                                            aria-label="Đóng"></button>
+                                    </div>
+
+                                    <div class="modal-body">
+                                        <div class="row g-3">
+                                            <div class="col-md-4">
+                                                <label class="form-label text-muted">Mã tuyến</label>
+                                                <div class="form-control bg-light">
+                                                    <%= safe(route.routeNumber) %>
+                                                </div>
+                                            </div>
+
+                                            <div class="col-md-8">
+                                                <label class="form-label text-muted">Tên tuyến</label>
+                                                <div class="form-control bg-light">
+                                                    <%= safe(route.name) %>
+                                                </div>
+                                            </div>
+
+                                            <div class="col-md-4">
+                                                <label class="form-label text-muted">Cự ly</label>
+                                                <div class="form-control bg-light">
+                                                    <%= fmtDistance(route.distance) %>
+                                                </div>
+                                            </div>
+
+                                            <div class="col-md-4">
+                                                <label class="form-label text-muted">Giờ hoạt động</label>
+                                                <div class="form-control bg-light">
+                                                    <%= fmtOpTime(route) %>
+                                                </div>
+                                            </div>
+
+                                            <div class="col-md-4">
+                                                <label class="form-label text-muted">Giá vé tháng</label>
+                                                <div class="form-control bg-light">
+                                                    <%= fmtMoney(route.monthlyPassPrice) %>
+                                                </div>
+                                            </div>
+
+                                            <div class="col-md-4">
+                                                <label class="form-label text-muted">Trạng thái</label>
+                                                <div>
+                                                    <span class="badge <%= badgeClass(route.status) %>">
+                                                        <%= badgeText(route.status) %>
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            <div class="col-12">
+                                                <label class="form-label text-muted">Mô tả</label>
+                                                <div class="form-control bg-light" style="min-height: 90px;">
+                                                    <%= safe(route.description) || 'Chưa có mô tả' %>
+                                                </div>
+                                            </div>
+
+                                            <div class="col-12">
+                                                <label class="form-label text-muted">Số lượng trạm đang lưu</label>
+                                                <div class="form-control bg-light">
+                                                    <%= Array.isArray(route.stops) ? route.stops.length : 0 %> trạm
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-light"
+                                            data-bs-dismiss="modal">Đóng</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <% }) %>
+
+                            <!-- ================= EDIT MODALS (UC34) ================= -->
+                            <% routeList.forEach((route, idx)=> { %>
+                                <div class="modal fade" id="editRouteModal-<%= idx %>" tabindex="-1"
+                                    aria-labelledby="editRouteModalLabel-<%= idx %>" aria-hidden="true">
+                                    <div class="modal-dialog modal-lg">
+                                        <div class="modal-content">
+                                            <form action="/admin/routes/<%= route._id %>/update" method="POST">
+                                                <div class="modal-header">
+                                                    <h5 class="modal-title" id="editRouteModalLabel-<%= idx %>">
+                                                        Chỉnh sửa tuyến - <%= safe(route.routeNumber) %>
+                                                    </h5>
+                                                    <button type="button" class="btn-close" data-bs-dismiss="modal"
+                                                        aria-label="Đóng"></button>
+                                                </div>
+
+                                                <div class="modal-body">
+                                                    <div class="row g-3">
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Mã tuyến *</label>
+                                                            <input type="text" name="routeNumber" class="form-control"
+                                                                value="<%= safe(route.routeNumber) %>" required>
+                                                        </div>
+
+                                                        <div class="col-md-8">
+                                                            <label class="form-label">Tên tuyến *</label>
+                                                            <input type="text" name="name" class="form-control"
+                                                                value="<%= safe(route.name) %>" required>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Cự ly (km) *</label>
+                                                            <input type="number" step="0.1" min="0.1" name="distance"
+                                                                class="form-control" value="<%= safe(route.distance) %>"
+                                                                required>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Giờ bắt đầu</label>
+                                                            <input type="time" name="startTime" class="form-control"
+                                                                value="<%= timeValue(route, 'start') %>">
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Giờ kết thúc</label>
+                                                            <input type="time" name="endTime" class="form-control"
+                                                                value="<%= timeValue(route, 'end') %>">
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Trạng thái</label>
+                                                            <select class="form-select" name="status">
+                                                                <option value="ACTIVE" <%=route.status==='ACTIVE'
+                                                                    ? 'selected' : '' %>>
+                                                                    Đang hoạt động
+                                                                </option>
+                                                                <option value="INACTIVE" <%=route.status==='INACTIVE'
+                                                                    ? 'selected' : '' %>>
+                                                                    Tạm ngưng
+                                                                </option>
+                                                            </select>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Giá vé tháng</label>
+                                                            <input type="number" step="1000" min="0"
+                                                                name="monthlyPassPrice" class="form-control"
+                                                                value="<%= valueOrDefault(route.monthlyPassPrice, 200000) %>">
+                                                        </div>
+
+                                                        <div class="col-12">
+                                                            <label class="form-label">Mô tả</label>
+                                                            <textarea name="description" rows="3"
+                                                                class="form-control"><%= safe(route.description) %></textarea>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div class="modal-footer">
+                                                    <button type="button" class="btn btn-light"
+                                                        data-bs-dismiss="modal">Hủy</button>
+                                                    <button type="submit" class="btn btn-primary">Lưu thay đổi</button>
+                                                </div>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                                <% }) %>

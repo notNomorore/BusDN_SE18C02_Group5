@@ -1,31 +1,55 @@
 const express = require('express');
 const router = express.Router();
+
+// --- 1. IMPORT MIDDLEWARE & CONTROLLERS ---
 const { isAdmin } = require('../middleware/adminMiddleware');
 const { renderAdmin } = require('../middleware/renderAdmin');
 const { User } = require('../models/models');
-const adminController = require('../controllers/adminController');
 
-// --- ADMIN API ROUTES (Handle operations) - Define specific routes first ---
+// Controllers từ cả 2 nguồn
+const adminController = require('../controllers/adminController'); // Của Minh: Nhân sự, Profile
+const adminRouteController = require('../controllers/adminRouteController'); // Của Trí: Tuyến xe
+const adminStopController = require('../controllers/adminStopController');   // Của Trí: Trạm dừng
 
-// --- ADMIN VIEW ROUTES (Render pages) - Define general routes last ---
+// --- 2. TỔNG QUAN & HỒ SƠ (Admin Dashboard) ---
 router.get('/dashboard', isAdmin, (req, res) => renderAdmin(req, res, 'admin/dashboard', 'Tổng quan'));
-router.get('/routes', isAdmin, (req, res) => renderAdmin(req, res, 'admin/routes', 'Quản lý Tuyến'));
-router.get('/schedules', isAdmin, (req, res) => renderAdmin(req, res, 'admin/schedules', 'Điều phối Lịch'));
 
 router.get('/profile', isAdmin, async (req, res) => {
-    const user = await User.findById(req.session.userId);
-    renderAdmin(req, res, 'admin/profile', 'Hồ sơ Admin', { user });
+    try {
+        const user = await User.findById(req.session.userId);
+        renderAdmin(req, res, 'admin/profile', 'Hồ sơ Admin', { user });
+    } catch (error) {
+        res.redirect('/home');
+    }
 });
 
-// Quản lý nhân sự
-router.get('/staff', adminController.getStaffList);
-router.get('/staff/create', adminController.getCreateStaff);
-router.post('/staff/create', adminController.createStaff);
-router.post('/staff/:userId/toggle-lock', adminController.toggleLock); // Nút khóa/mở
+// --- 3. QUẢN LÝ TUYẾN XE (Routes) ---
+router.get('/routes', isAdmin, adminRouteController.getRoutesPage);
+router.post('/routes/create', isAdmin, adminRouteController.createRoute);
+router.post('/routes/:id/update', isAdmin, adminRouteController.updateRoute);
+router.post('/routes/:id/deactivate', isAdmin, adminRouteController.deactivateRoute);
+router.post('/routes/:id/activate', isAdmin, adminRouteController.activateRoute);
 
-// Quản lý hồ sơ ưu tiên
-router.get('/priority-profiles', adminController.getPriorityProfiles);
-router.post('/priority-profiles/:userId/approve', adminController.approveProfile); // Nút duyệt
-router.post('/priority-profiles/:userId/reject', adminController.rejectProfile);   // Nút từ chối
+// --- 4. QUẢN LÝ TRẠM DỪNG (Stops) ---
+router.get('/stops', isAdmin, adminStopController.getStopsPage);
+router.post('/stops/create', isAdmin, adminStopController.createStop);
+router.post('/stops/:id/update', isAdmin, adminStopController.updateStop);
+router.post('/stops/:id/deactivate', isAdmin, adminStopController.deactivateStop);
+router.post('/stops/:id/activate', isAdmin, adminStopController.activateStop);
+
+// --- 5. ĐIỀU PHỐI LỊCH CHẠY (Schedules) ---
+// Tạm thời để render view cho đến khi bạn có adminScheduleController
+router.get('/schedules', isAdmin, (req, res) => renderAdmin(req, res, 'admin/schedules', 'Điều phối Lịch'));
+
+// --- 6. QUẢN LÝ NHÂN SỰ (Staff) ---
+router.get('/staff', isAdmin, adminController.getStaffList);
+router.get('/staff/create', isAdmin, adminController.getCreateStaff);
+router.post('/staff/create', isAdmin, adminController.createStaff);
+router.post('/staff/:userId/toggle-lock', isAdmin, adminController.toggleLock);
+
+// --- 7. QUẢN LÝ HỒ SƠ ƯU TIÊN (Priority Profiles) ---
+router.get('/priority-profiles', isAdmin, adminController.getPriorityProfiles);
+router.post('/priority-profiles/:userId/approve', isAdmin, adminController.approveProfile);
+router.post('/priority-profiles/:userId/reject', isAdmin, adminController.rejectProfile);
 
 module.exports = router;

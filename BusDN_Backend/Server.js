@@ -1,7 +1,10 @@
+require('dotenv').config(); // Luôn đặt đầu tiên để nạp .env
 const express = require('express');
-const multer = require('multer');
 const path = require('path');
+const session = require('express-session');
+const passport = require('passport');
 const connectDB = require('./config/connectdb');
+
 // --- 1. IMPORT CONFIGURATIONS ---
 const configViewEngine = require('./config/viewEngine');
 const configPassport = require('./config/passport');
@@ -10,42 +13,63 @@ const { upload } = require('./config/multer');
 // --- 2. SETUP EXPRESS APP ---
 const app = express();
 
-// --- 3. SETUP VIEW ENGINE & MIDDLEWARE ---
-configViewEngine(app);
-configPassport(app);
+// --- 3. DATABASE CONNECTION ---
+connectDB(); // Sử dụng hàm connect từ config/database.js của bạn
 
-// --- 4. MONGODB CONNECTION ---
-connectDB();
+// --- 4. MIDDLEWARE (Tối ưu từ cả hai nhánh) ---
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(session({
+    secret: process.env.SESSION_SECRET || "my_secret_key",
+    resave: false,
+    saveUninitialized: false,
+}));
+
+// SETUP VIEW ENGINE & PASSPORT
+configViewEngine(app);
+configPassport(app); // Chỗ này đã bao gồm passport.initialize() và session()
+
 // --- 5. ROUTES CONFIGURATION ---
+// Import các router đã được tách file (Giữ cấu trúc sạch của bạn)
 const webRoutes = require('./routes/webRoutes')(upload);
 const adminRoutes = require('./routes/adminRoutes');
 const authRoutes = require('./routes/authRoutes');
+const passengerRoutes = require('./routes/passengerRoutes');
 
-// Web routes (home, login, register, profile, etc.)
+// Web routes (home, login, register, profile, lookup, etc.)
 app.use('/', webRoutes);
 
-// Admin routes (require isAdmin middleware)
+// Admin routes (đã tách ra file riêng để Server.js không bị dài)
 app.use('/admin', adminRoutes);
-app.use('/admin/staff', adminRoutes); // Ensure staff management routes are included under /admin/staff
-// API routes for mobile
+
+// API routes cho mobile
 app.use('/api/auth', authRoutes);
 
-// --- GOOGLE AUTH ROUTES ---
-const passport = require('passport');
+// Passenger routes (UC13: Wallet/Deposit của anh Trí)
+app.use('/passenger', passengerRoutes);
+
+// --- 6. GOOGLE AUTH ROUTES (Giữ logic redirect chuẩn) ---
 app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 app.get('/auth/google/callback',
     passport.authenticate('google', { failureRedirect: '/login' }),
     async (req, res) => {
-        req.session.userId = req.user._id;
-        req.session.role = req.user.role;
-        res.redirect('/home');
+        if (req.user) {
+            req.session.userId = req.user._id;
+            req.session.role = req.user.role;
+            res.redirect('/home');
+        } else {
+            res.redirect('/login');
+        }
     }
 );
 
-// --- 6. ROOT REDIRECT ---
+// --- 7. ROOT REDIRECT ---
 app.get('/', (req, res) => {
-    res.redirect('/home');
+    if (!req.session.userId) return res.redirect("/login");
+    if (req.session.role === "ADMIN") return res.redirect("/admin/dashboard");
+    return res.redirect('/home');
 });
 
-// --- 7. START SERVER ---
-app.listen(3000, () => console.log('🚀 Server chạy tại: http://localhost:3000'));
+// --- 8. START SERVER ---
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`🚀 Server chạy tại: http://localhost:${PORT}`));
