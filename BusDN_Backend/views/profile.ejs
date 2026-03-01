@@ -118,7 +118,7 @@
                                                     <small class="opacity-75">Số dư ví BusDN</small>
                                                     <div class="fs-4 fw-bold wallet-balance-animate"
                                                         id="walletBalanceText">
-                                                        <%= Number(user.walletBalance || walletBalance ||
+                                                        <%= Number((user && user.walletBalance) ? user.walletBalance :
                                                             0).toLocaleString("vi-VN") %> đ
                                                     </div>
 
@@ -224,7 +224,7 @@
                                                 <div class="row g-3">
                                                     <div class="col-md-6">
                                                         <div class="feature-card h-100">
-                                                            
+
                                                             <div class="text-muted small mb-3">
                                                                 Xem số dư ví hiện tại, lịch sử giao dịch và vé tháng đã
                                                                 mua.

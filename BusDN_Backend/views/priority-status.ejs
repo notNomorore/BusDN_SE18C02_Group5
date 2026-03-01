@@ -1,0 +1,399 @@
+<%- include('./partials/header') %>
+
+<style>
+    .status-container {
+        max-width: 800px;
+        margin: 50px auto;
+        padding: 0 15px;
+    }
+    
+    .status-card {
+        background: white;
+        border-radius: 10px;
+        box-shadow: 0 2px 15px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+    }
+    
+    .status-header {
+        background: linear-gradient(135deg, #003366 0%, #0056b3 100%);
+        color: white;
+        padding: 40px;
+        text-align: center;
+    }
+    
+    .status-header h1 {
+        margin: 0 0 10px 0;
+        font-size: 32px;
+    }
+    
+    .status-header p {
+        margin: 0;
+        font-size: 14px;
+        opacity: 0.9;
+    }
+    
+    .status-body {
+        padding: 40px;
+    }
+    
+    .status-badge {
+        display: inline-block;
+        padding: 8px 16px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 20px;
+    }
+    
+    .status-badge.pending {
+        background-color: #fff3cd;
+        color: #856404;
+        border: 1px solid #ffc107;
+    }
+    
+    .status-badge.approved {
+        background-color: #d4edda;
+        color: #155724;
+        border: 1px solid #28a745;
+    }
+    
+    .status-badge.rejected {
+        background-color: #f8d7da;
+        color: #721c24;
+        border: 1px solid #dc3545;
+    }
+    
+    .timeline {
+        position: relative;
+        padding: 30px 0;
+    }
+    
+    .timeline-item {
+        display: flex;
+        margin-bottom: 30px;
+        position: relative;
+        padding-left: 60px;
+    }
+    
+    .timeline-item:last-child {
+        margin-bottom: 0;
+    }
+    
+    .timeline-item::before {
+        content: '';
+        position: absolute;
+        left: 15px;
+        top: 0;
+        bottom: -30px;
+        width: 2px;
+        background-color: #ddd;
+    }
+    
+    .timeline-item:last-child::before {
+        display: none;
+    }
+    
+    .timeline-circle {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        background-color: white;
+        border: 3px solid #ddd;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+    }
+    
+    .timeline-item.completed .timeline-circle {
+        background-color: #28a745;
+        border-color: #28a745;
+        color: white;
+    }
+    
+    .timeline-item.in-progress .timeline-circle {
+        background-color: #ffc107;
+        border-color: #ffc107;
+        color: white;
+    }
+    
+    .timeline-content h4 {
+        margin: 0 0 5px 0;
+        color: #333;
+        font-size: 16px;
+    }
+    
+    .timeline-content p {
+        margin: 0;
+        color: #666;
+        font-size: 13px;
+    }
+    
+    .timeline-item.completed .timeline-content h4 {
+        color: #28a745;
+    }
+    
+    .timeline-item.in-progress .timeline-content h4 {
+        color: #ffc107;
+    }
+    
+    .info-section {
+        background-color: #f9f9f9;
+        border-left: 4px solid #003366;
+        padding: 20px;
+        margin: 30px 0;
+        border-radius: 5px;
+    }
+    
+    .info-section h3 {
+        margin-top: 0;
+        color: #003366;
+        font-size: 16px;
+    }
+    
+    .info-section p {
+        margin: 10px 0;
+        color: #555;
+        font-size: 14px;
+        line-height: 1.6;
+    }
+    
+    .profile-details {
+        background-color: #f0f5ff;
+        padding: 20px;
+        border-radius: 5px;
+        margin: 20px 0;
+    }
+    
+    .profile-details h4 {
+        margin-top: 0;
+        color: #003366;
+        font-size: 16px;
+    }
+    
+    .detail-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 10px 0;
+        border-bottom: 1px solid #ddd;
+        font-size: 14px;
+    }
+    
+    .detail-row:last-child {
+        border-bottom: none;
+    }
+    
+    .detail-label {
+        font-weight: 600;
+        color: #333;
+    }
+    
+    .detail-value {
+        color: #666;
+    }
+    
+    .button-group {
+        display: flex;
+        gap: 10px;
+        margin-top: 30px;
+        justify-content: center;
+    }
+    
+    .btn {
+        padding: 12px 30px;
+        border: none;
+        border-radius: 5px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-block;
+        transition: all 0.3s;
+    }
+    
+    .btn-primary {
+        background-color: #003366;
+        color: white;
+    }
+    
+    .btn-primary:hover {
+        background-color: #002244;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0, 51, 102, 0.3);
+    }
+    
+    .btn-secondary {
+        background-color: #6c757d;
+        color: white;
+    }
+    
+    .btn-secondary:hover {
+        background-color: #5a6268;
+    }
+    
+    .progress-visualization {
+        margin: 30px 0;
+    }
+    
+    .progress-bar-container {
+        height: 6px;
+        background-color: #ddd;
+        border-radius: 3px;
+        overflow: hidden;
+    }
+    
+    .progress-bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #ffc107 0%, #ffc107 100%);
+        width: 33.33%;
+        transition: width 0.3s;
+    }
+    
+    .message {
+        background-color: #e3f2fd;
+        border-left: 4px solid #003366;
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 20px;
+        color: #003366;
+    }
+    
+    @media (max-width: 768px) {
+        .status-header {
+            padding: 30px 20px;
+        }
+        
+        .status-body {
+            padding: 20px;
+        }
+        
+        .detail-row {
+            flex-direction: column;
+            padding: 15px 0;
+        }
+        
+        .button-group {
+            flex-direction: column;
+        }
+        
+        .btn {
+            width: 100%;
+        }
+    }
+</style>
+
+<div class="status-container">
+    <div class="status-card">
+        <div class="status-header">
+            <h1><i class="fas fa-hourglass-half me-2"></i> Application Under Review</h1>
+            <p>Your priority profile is being reviewed by our admin team</p>
+        </div>
+
+        <div class="status-body">
+            <% if (message) { %>
+                <div class="message">
+                    <%= message %>
+                </div>
+            <% } %>
+
+            <!-- Status Badge -->
+            <div>
+                <span class="status-badge pending">
+                    <i class="fas fa-clock me-2"></i> PENDING REVIEW
+                </span>
+            </div>
+
+            <!-- Progress Visualization -->
+            <div class="progress-visualization">
+                <div class="progress-bar-container">
+                    <div class="progress-bar-fill"></div>
+                </div>
+                <p style="margin: 10px 0 0 0; font-size: 12px; color: #666;">
+                    Typically reviewed within 3-5 business days
+                </p>
+            </div>
+
+            <!-- Timeline -->
+            <div class="timeline">
+                <div class="timeline-item completed">
+                    <div class="timeline-circle"><i class="fas fa-check"></i></div>
+                    <div class="timeline-content">
+                        <h4>Application Submitted</h4>
+                        <p><%= new Date(profile.createdAt).toLocaleDateString() %></p>
+                    </div>
+                </div>
+
+                <div class="timeline-item in-progress">
+                    <div class="timeline-circle"><i class="fas fa-spinner"></i></div>
+                    <div class="timeline-content">
+                        <h4>Under Review</h4>
+                        <p>Our admin team is verifying your documents</p>
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-circle"><i class="fas fa-check-circle"></i></div>
+                    <div class="timeline-content">
+                        <h4>Decision Made</h4>
+                        <p>You will receive an email with the result</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Profile Details -->
+            <div class="profile-details">
+                <h4><i class="fas fa-id-card me-2"></i> Application Details</h4>
+                <div class="detail-row">
+                    <span class="detail-label">Category:</span>
+                    <span class="detail-value"><%= profile.category %></span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">ID Number:</span>
+                    <span class="detail-value"><%= profile.idNumber %></span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Status:</span>
+                    <span class="detail-value">
+                        <strong style="color: #ffc107;">PENDING REVIEW</strong>
+                    </span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Submitted:</span>
+                    <span class="detail-value"><%= new Date(profile.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) %></span>
+                </div>
+            </div>
+
+            <!-- Information Section -->
+            <div class="info-section">
+                <h3><i class="fas fa-info-circle me-2"></i> What Happens Next?</h3>
+                <p>
+                    <strong>1. Document Verification:</strong> Our admin team will verify that all your documents are authentic and meet our requirements.
+                </p>
+                <p>
+                    <strong>2. Decision:</strong> Based on the verification results, we will either approve or reject your application.
+                </p>
+                <p>
+                    <strong>3. Notification:</strong> You will receive an email notification with the decision. If approved, your priority status becomes active immediately.
+                </p>
+                <p>
+                    <strong>4. Start Using Benefits:</strong> Once approved, you can use the discounted fare system immediately.
+                </p>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="button-group">
+                <a href="/" class="btn btn-secondary">
+                    <i class="fas fa-home me-2"></i> Back to Home
+                </a>
+                <a href="/priority/register" class="btn btn-primary">
+                    <i class="fas fa-edit me-2"></i> Update Application
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<%- include('./partials/footer') %>

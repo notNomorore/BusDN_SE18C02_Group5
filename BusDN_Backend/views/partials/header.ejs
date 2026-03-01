@@ -1,265 +1,125 @@
-<nav class="navbar navbar-expand-lg navbar-dark busdn-navbar"
-    style="background: linear-gradient(135deg,#003366,#004b99) !important; padding:12px 0; position:relative; z-index:9999; opacity:1 !important; box-shadow:0 8px 20px rgba(0,30,60,.18);">
-    <div class="container">
-        <a class="navbar-brand fw-bold fs-4 d-flex align-items-center gap-2" href="/home"
-            style="color:#fff !important; opacity:1 !important;">
-            <i class="fa-solid fa-bus text-warning"></i>
-            <span>BusDN</span>
-        </a>
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BusDN - Hệ thống vé xe buýt</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .main-header {
+            position: sticky;
+            top: 0;
+            z-index: 1050; 
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
 
-        <button class="navbar-toggler border-0 shadow-none" type="button" data-bs-toggle="collapse"
-            data-bs-target="#mainNav" aria-label="Mở menu">
-            <span class="navbar-toggler-icon"></span>
-        </button>
+<header class="main-header">
+    <nav class="navbar navbar-expand-lg navbar-dark" style="background-color: #003366; padding: 15px 0; border-bottom: 3px solid #ffc107;">
+        <div class="container">
+            <a class="navbar-brand fw-bold fs-4" href="/home">
+                <i class="fa-solid fa-bus text-warning"></i> BusDN
+            </a>
 
-        <div class="collapse navbar-collapse" id="mainNav">
-            <ul class="navbar-nav mx-auto" style="align-items:center;">
-                <li class="nav-item">
-                    <a class="nav-link mx-1" href="/home"
-                        style="color:rgba(255,255,255,.95) !important; font-weight:500; padding:8px 12px; border-radius:10px; opacity:1 !important;">
-                        Trang chủ
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link mx-1" href="#"
-                        style="color:rgba(255,255,255,.95) !important; font-weight:500; padding:8px 12px; border-radius:10px; opacity:1 !important;">
-                        Tra cứu tuyến
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link mx-1" href="<%= user ? '/passenger/monthly-pass' : '/login' %>"
-                        style="color:rgba(255,255,255,.95) !important; font-weight:500; padding:8px 12px; border-radius:10px; opacity:1 !important;">
-                        Vé của tôi
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link mx-1" href="#"
-                        style="color:rgba(255,255,255,.95) !important; font-weight:500; padding:8px 12px; border-radius:10px; opacity:1 !important;">
-                        Tin tức
-                    </a>
-                </li>
-            </ul>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
 
-            <% if (user) { %>
+            <div class="collapse navbar-collapse" id="mainNav">
+                <ul class="navbar-nav mx-auto">
+                    <li class="nav-item"><a class="nav-link text-white mx-2" href="/home">Trang chủ</a></li>
+                    <li class="nav-item"><a class="nav-link text-white mx-2" href="/route-lookup">Tra cứu tuyến</a></li>
+                    <li class="nav-item"><a class="nav-link text-white mx-2" href="#">Tin tức</a></li>
+                    <% if (typeof user !== 'undefined' && user) { %>
+                        <li class="nav-item"><a class="nav-link text-white mx-2" href="/passenger/monthly-pass">Vé của tôi</a></li>
+                    <% } %>
+                </ul>
+                
+                <% if (typeof user !== 'undefined' && user) { %>
                 <div class="d-flex align-items-center gap-2 ms-lg-3 flex-wrap flex-lg-nowrap">
 
-                    <!-- WALLET MINI (Desktop) -->
                     <a href="/passenger/wallet"
                         class="d-none d-lg-flex align-items-center text-decoration-none text-white" title="Xem ví BusDN"
-                        data-wallet-balance-url="/passenger/wallet/balance" style="
-                     min-width:235px;
-                     max-width:330px;
-                     gap:10px;
-                     padding:10px 12px;
-                     border-radius:16px;
-                     background:rgba(255,255,255,.12);
-                     border:1px solid rgba(255,255,255,.18);
-                     color:#fff !important;
-                     box-shadow:0 8px 16px rgba(0,0,0,.14);
-                     backdrop-filter: blur(6px);
-                     -webkit-backdrop-filter: blur(6px);
-                     opacity:1 !important;
-                   ">
+                        style="min-width:210px; max-width:330px; gap:10px; padding:8px 12px; border-radius:16px; background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.18); color:#fff !important; box-shadow:0 8px 16px rgba(0,0,0,.14); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);">
 
-                        <div class="d-grid place-items-center"
-                            style="width:40px;height:40px;border-radius:12px;background:rgba(255,211,77,.16);border:1px solid rgba(255,211,77,.35);flex-shrink:0;">
-                            <i class="fa-solid fa-wallet" style="color:#ffd34d;font-size:17px;"></i>
+                        <div class="d-grid" style="width:35px;height:35px;border-radius:10px;background:rgba(255,211,77,.16);border:1px solid rgba(255,211,77,.35);place-items:center; flex-shrink:0;">
+                            <i class="fa-solid fa-wallet" style="color:#ffd34d;font-size:15px;"></i>
                         </div>
 
                         <div style="min-width:0;flex:1;">
-                            <div style="font-size:11px;opacity:.88;line-height:1.1;margin-bottom:2px;">Ví BusDN</div>
-                            <div id="headerWalletBalanceText"
-                                style="font-weight:700;font-size:17px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.1px;transition:transform .18s ease;">
-                                <%= Number((user && user.walletBalance) || walletBalance || 0).toLocaleString("vi-VN")
-                                    %> đ
+                            <div style="font-size:10px;opacity:.8;line-height:1;margin-bottom:2px;">Ví BusDN</div>
+                            <div id="headerWalletBalanceText" style="font-weight:700;font-size:16px;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                                <%= Number(user.walletBalance || 0).toLocaleString("vi-VN") %> đ
                             </div>
                         </div>
 
-                        <div class="d-flex align-items-center gap-2" style="flex-shrink:0;">
-                            <span
-                                style="width:24px;height:24px;display:grid;place-items:center;border-radius:999px;background:rgba(255,255,255,.14);font-size:11px;">
-                                <i class="fa-solid fa-plus"></i>
-                            </span>
-                            <span class="spinner-border spinner-border-sm text-light d-none" id="headerWalletLoading"
-                                role="status" aria-hidden="true"></span>
+                        <div class="d-flex align-items-center" style="flex-shrink:0;">
+                            <i class="fa-solid fa-plus-circle" style="font-size:14px; opacity:0.6;"></i>
+                            <span class="spinner-border spinner-border-sm text-light d-none ms-1" id="headerWalletLoading" role="status"></span>
                         </div>
                     </a>
 
-
-
-
-                    <!-- USER DROPDOWN -->
                     <div class="dropdown">
                         <a href="#" id="userMenu" data-bs-toggle="dropdown" aria-expanded="false"
-                            class="dropdown-toggle text-decoration-none" style="
-                         display:inline-flex;
-                         align-items:center;
-                         gap:10px;
-                         padding:4px 10px 4px 4px;
-                         border-radius:999px;
-                         background:rgba(255,255,255,.10);
-                         border:1px solid rgba(255,255,255,.18);
-                         color:#fff !important;
-                         opacity:1 !important;
-                       ">
-                            <img src="<%= user && user.avatar ? user.avatar : 'https://via.placeholder.com/40x40?text=U' %>"
-                                alt="Avatar" width="40" height="40" class="me-1"
-                                style="width:38px;height:38px;object-fit:cover;border-radius:50%;border:2px solid #ffd34d;background:#f8fafc;box-shadow:0 0 0 2px rgba(255,255,255,.08);"
-                                onerror="this.onerror=null;this.src='https://via.placeholder.com/40x40?text=U';">
-                            <span class="fw-bold d-none d-md-inline"
-                                style="max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff !important;">
-                                <%= user ? user.fullName : 'Khách' %>
+                            class="dropdown-toggle text-decoration-none d-flex align-items-center" style="gap:10px; padding:4px 12px 4px 4px; border-radius:999px; background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); color:#fff !important;">
+                            
+                            <img src="<%= user.avatar ? user.avatar : 'https://via.placeholder.com/40x40?text=U' %>"
+                                 alt="Avatar" width="38" height="38" style="object-fit:cover; border-radius:50%; border:2px solid #ffd34d;">
+                            
+                            <span class="fw-bold d-none d-md-inline" style="max-width:120px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                <%= user.fullName %>
                             </span>
                         </a>
 
-                        <ul class="dropdown-menu dropdown-menu-end shadow border-0"
-                            style="width:280px;border-radius:14px;padding:6px;z-index:2000;">
-                            <!-- Wallet quick info (Mobile only) -->
-                            <li class="d-lg-none px-3 py-3 border-bottom">
-                                <div
-                                    style="border-radius:12px;padding:12px;background:linear-gradient(135deg,#0b4d96,#0a3f79);color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08);">
-                                    <div class="d-flex align-items-center gap-2">
-                                        <div
-                                            style="width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.14);">
-                                            <i class="fa-solid fa-wallet" style="color:#ffd34d;"></i>
-                                        </div>
-                                        <div>
-                                            <div class="small" style="color:rgba(255,255,255,.75);">Ví BusDN</div>
-                                            <div class="fw-bold" id="headerWalletBalanceTextMobile"
-                                                style="font-size:18px;line-height:1.15;">
-                                                <%= Number((user && user.walletBalance) || walletBalance ||
-                                                    0).toLocaleString("vi-VN") %> đ
-                                            </div>
-                                        </div>
+                        <ul class="dropdown-menu dropdown-menu-end shadow-lg border-0" style="width:260px; border-radius:14px; padding:8px; margin-top:10px;">
+                            <li class="d-lg-none px-2 mb-2">
+                                <div style="border-radius:12px; padding:12px; background: #f8f9fa; border: 1px solid #eee;">
+                                    <div class="small text-muted">Số dư ví:</div>
+                                    <div class="fw-bold text-primary fs-5" id="headerWalletBalanceTextMobile">
+                                        <%= Number(user.walletBalance || 0).toLocaleString("vi-VN") %> đ
                                     </div>
-                                    <div class="d-flex gap-2 mt-3">
-                                        <a href="/passenger/wallet" class="btn btn-sm btn-light flex-fill">Xem ví</a>
-                                        <a href="/passenger/wallet/deposit"
-                                            class="btn btn-sm btn-warning flex-fill fw-bold">Nạp</a>
-                                    </div>
+                                    <a href="/passenger/wallet" class="btn btn-sm btn-warning w-100 mt-2 fw-bold">Nạp tiền</a>
                                 </div>
                             </li>
 
-                            <li>
-                                <a class="dropdown-item" href="/profile"
-                                    style="border-radius:10px;padding:10px 12px;font-weight:500;">
-                                    <i class="fa-solid fa-user me-2"></i> Hồ sơ cá nhân
-                                </a>
-                            </li>
-
-
-
-                            <li>
-                                <a class="dropdown-item" href="#"
-                                    style="border-radius:10px;padding:10px 12px;font-weight:500;">
-                                    <i class="fa-solid fa-qrcode me-2"></i> Mã vé QR
-                                </a>
-                            </li>
-
-                            <li>
-                                <hr class="dropdown-divider" style="margin:6px 0;">
-                            </li>
-
-                            <li>
-                                <a class="dropdown-item text-danger" href="/logout"
-                                    style="border-radius:10px;padding:10px 12px;font-weight:500;">
-                                    <i class="fa-solid fa-right-from-bracket me-2"></i> Đăng xuất
-                                </a>
-                            </li>
+                            <li><a class="dropdown-item py-2" href="/profile"><i class="fa-solid fa-user me-2 text-primary"></i> Hồ sơ cá nhân</a></li>
+                            <li><a class="dropdown-item py-2" href="/priority/register"><i class="fa-solid fa-id-card me-2 text-success"></i> Đăng ký ưu tiên</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item text-danger py-2" href="/logout"><i class="fa-solid fa-right-from-bracket me-2"></i> Đăng xuất</a></li>
                         </ul>
                     </div>
                 </div>
                 <% } else { %>
-                    <!-- Nếu chưa đăng nhập -->
                     <div class="d-flex align-items-center gap-2">
-                        <a href="/login" class="btn btn-outline-light btn-sm">Đăng nhập</a>
-                        <a href="/register" class="btn btn-warning btn-sm fw-bold">Đăng ký</a>
+                        <a href="/login" class="btn btn-outline-light btn-sm px-3">Đăng nhập</a>
+                        <a href="/register" class="btn btn-warning btn-sm fw-bold px-3">Đăng ký</a>
                     </div>
-                    <% } %>
+                <% } %>
+            </div>
         </div>
-    </div>
-</nav>
+    </nav>
+</header>
 
-<!-- Header Wallet Auto Refresh -->
 <script>
     (function () {
         const desktopEl = document.getElementById('headerWalletBalanceText');
         const mobileEl = document.getElementById('headerWalletBalanceTextMobile');
-        const loadingEl = document.getElementById('headerWalletLoading');
-
-        // Nếu chưa đăng nhập / không có wallet UI thì bỏ qua
         if (!desktopEl && !mobileEl) return;
 
-        let isFetching = false;
-        let timer = null;
-
-        function normalizeBalanceText(data) {
-            if (!data) return null;
-
-            // Nếu backend trả text sẵn, tránh bị "đ đ"
-            if (typeof data.walletBalanceText === 'string') {
-                const t = data.walletBalanceText.trim();
-                return /đ$/i.test(t) ? t : (t + ' đ');
-            }
-
-            if (typeof data.walletBalance !== 'undefined') {
-                return Number(data.walletBalance || 0).toLocaleString('vi-VN') + ' đ';
-            }
-
-            return null;
-        }
-
-        function pulse(el) {
-            if (!el) return;
-            el.style.transform = 'scale(1.04)';
-            setTimeout(() => { el.style.transform = 'scale(1)'; }, 180);
-        }
-
         async function fetchHeaderWalletBalance() {
-            if (isFetching) return;
-            isFetching = true;
-            if (loadingEl) loadingEl.classList.remove('d-none');
-
             try {
-                const res = await fetch('/passenger/wallet/balance', {
-                    method: 'GET',
-                    headers: { 'Accept': 'application/json' },
-                    cache: 'no-store',
-                    credentials: 'same-origin'
-                });
-
-                if (!res.ok) return;
+                const res = await fetch('/passenger/wallet/balance');
                 const data = await res.json();
-                if (!data || data.ok === false) return;
-
-                const nextText = normalizeBalanceText(data);
-                if (!nextText) return;
-
-                if (desktopEl) {
-                    const prevText = (desktopEl.textContent || '').trim();
-                    desktopEl.textContent = nextText;
-                    if (prevText && prevText !== nextText) pulse(desktopEl);
+                if (data && data.walletBalance !== undefined) {
+                    const formatted = Number(data.walletBalance).toLocaleString('vi-VN') + ' đ';
+                    if (desktopEl) desktopEl.textContent = formatted;
+                    if (mobileEl) mobileEl.textContent = formatted;
                 }
-
-                if (mobileEl) mobileEl.textContent = nextText;
-
-            } catch (e) {
-                // silent fail
-            } finally {
-                if (loadingEl) loadingEl.classList.add('d-none');
-                isFetching = false;
-            }
+            } catch (e) { console.log("Wallet update failed"); }
         }
-
-        fetchHeaderWalletBalance();
-        timer = setInterval(fetchHeaderWalletBalance, 5000);
-
-        document.addEventListener('visibilitychange', function () {
-            if (!document.hidden) fetchHeaderWalletBalance();
-        });
-
-        window.addEventListener('beforeunload', function () {
-            if (timer) clearInterval(timer);
-        });
+        setInterval(fetchHeaderWalletBalance, 10000);
     })();
 </script>

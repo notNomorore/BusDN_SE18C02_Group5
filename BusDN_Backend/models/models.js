@@ -71,10 +71,33 @@ const ScheduleSchema = new mongoose.Schema({
     }
 });
 
+const PriorityProfileSchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    category: { 
+        type: String, 
+        enum: ['Student', 'War Veteran', 'Disabled', 'Elderly', 'Other'],
+        required: true 
+    },
+    idNumber: { type: String, required: true },
+    idCardImageFront: { type: String, required: true },
+    idCardImageBack: { type: String, required: true },
+    proofImage: { type: String, required: true },
+    status: { 
+        type: String, 
+        enum: ['pending', 'approved', 'rejected'],
+        default: 'pending'
+    },
+    rejectionReason: { type: String, default: null },
+    expiryDate: { type: Date, default: null },
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now }
+}, { timestamps: true });
+
 module.exports = {
     User: mongoose.model('User', UserSchema),
     Stop: mongoose.model('Stop', StopSchema),
     Route: mongoose.model('Route', RouteSchema),
     Bus: mongoose.model('Bus', BusSchema),
-    Schedule: mongoose.model('Schedule', ScheduleSchema)
+    Schedule: mongoose.model('Schedule', ScheduleSchema),
+    PriorityProfile: mongoose.models.PriorityProfile || mongoose.model('PriorityProfile', PriorityProfileSchema)
 };

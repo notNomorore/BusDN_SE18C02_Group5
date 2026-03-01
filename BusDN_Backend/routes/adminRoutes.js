@@ -4,12 +4,11 @@ const router = express.Router();
 // --- 1. IMPORT MIDDLEWARE & CONTROLLERS ---
 const { isAdmin } = require('../middleware/adminMiddleware');
 const { renderAdmin } = require('../middleware/renderAdmin');
-const { User } = require('../models/models');
-
-// Controllers từ cả 2 nguồn
-const adminController = require('../controllers/adminController'); // Của Minh: Nhân sự, Profile
-const adminRouteController = require('../controllers/adminRouteController'); // Của Trí: Tuyến xe
-const adminStopController = require('../controllers/adminStopController');   // Của Trí: Trạm dừng
+const { User, PriorityProfile } = require('../models/models');
+const adminController = require('../controllers/adminController');
+const priorityController = require('../controllers/priorityController');
+const adminRouteController = require('../controllers/adminRouteController');
+const adminStopController = require('../controllers/adminStopController');  
 
 // --- 2. TỔNG QUAN & HỒ SƠ (Admin Dashboard) ---
 router.get('/dashboard', isAdmin, (req, res) => renderAdmin(req, res, 'admin/dashboard', 'Tổng quan'));
@@ -36,6 +35,11 @@ router.post('/stops/create', isAdmin, adminStopController.createStop);
 router.post('/stops/:id/update', isAdmin, adminStopController.updateStop);
 router.post('/stops/:id/deactivate', isAdmin, adminStopController.deactivateStop);
 router.post('/stops/:id/activate', isAdmin, adminStopController.activateStop);
+// Quản lý hồ sơ ưu tiên (Priority Profile Management)
+router.get('/priority-profiles', isAdmin, priorityController.listProfiles);
+router.get('/priority-profiles/:profileId', isAdmin, priorityController.viewProfileDetail);
+router.post('/priority-profiles/:profileId/approve', isAdmin, priorityController.approveProfile);
+router.post('/priority-profiles/:profileId/reject', isAdmin, priorityController.rejectProfile);
 
 // --- 5. ĐIỀU PHỐI LỊCH CHẠY (Schedules) ---
 // Tạm thời để render view cho đến khi bạn có adminScheduleController

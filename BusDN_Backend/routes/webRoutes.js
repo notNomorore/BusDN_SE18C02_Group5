@@ -4,7 +4,7 @@ const nodemailer = require('nodemailer');
 const { User } = require('../models/models');
 const { checkPassword, PASS_ERR_MSG } = require('../config/helpers');
 const { getAllRoutes, getRouteDetail, getRouteGeoJSON } = require('../controllers/routeController');
-
+require('dotenv').config();
 // This module exports a function that takes upload middleware
 module.exports = (upload) => {
     const router = express.Router();
@@ -13,8 +13,8 @@ module.exports = (upload) => {
     const transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
-            user: 'nguyennhatminhnau@gmail.com',
-            pass: 'pcum hoif vant qygx'
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASS
         }
     });
 
@@ -183,7 +183,7 @@ module.exports = (upload) => {
         const error = req.query.error;
         const success = req.query.success;
 
-        res.render('profile', { user, error, success });
+        res.render('profile', { user: req.user, error, success });
     });
 
     // --- UPLOAD AVATAR ---
