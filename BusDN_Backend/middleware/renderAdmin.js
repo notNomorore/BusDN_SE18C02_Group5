@@ -20,6 +20,8 @@ const renderAdmin = async (req, res, view, title, data = {}) => {
             role: 'ALL'
         };
 
+        const backUrl = req.get('referer') || '';
+
         res.render(view, { ...defaultData, ...data }, (err, html) => {
             if (err) {
                 console.error('Error rendering view:', err);
@@ -29,7 +31,8 @@ const renderAdmin = async (req, res, view, title, data = {}) => {
                 body: html,
                 title: title,
                 path: data.path || pageName, // Đồng bộ path ra layout
-                user: currentUser
+                user: currentUser,
+                backUrl
             });
         });
     } catch (e) {

@@ -1,4 +1,4 @@
-const { User, Route, MonthlyPass, WalletTransaction } = require("../models");
+const { User, Route, MonthlyPass, WalletTransaction } = require("../models/models");
 
 function isPassenger(req) {
     return req.session?.userId && req.session?.role === "PASSENGER";

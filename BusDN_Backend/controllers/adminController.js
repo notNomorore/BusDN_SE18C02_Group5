@@ -1,31 +1,8 @@
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 const { User } = require('../models/models');
-const { checkPassword, PASS_ERR_MSG } = require('../config/helpers');
+const { checkPassword, PASS_ERR_MSG, sendEmail } = require('../config/helpers');
 const { renderAdmin } = require('../middleware/renderAdmin');
-
-// --- NODEMAILER CONFIGURATION ---
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: 'nguyennhatminhnau@gmail.com',
-        pass: 'pcum hoif vant qygx'
-    }
-});
-
-const sendEmail = async (to, subject, htmlContent) => {
-    try {
-        await transporter.sendMail({
-            from: '"BusDN Admin" <nguyennhatminhnau@gmail.com>',
-            to: to,
-            subject: subject,
-            html: htmlContent
-        });
-        console.log(`✅ Đã gửi mail tới ${to}`);
-    } catch (error) {
-        console.error('❌ Lỗi gửi mail:', error);
-    }
-};
 
 // --- 0. GET STAFF LIST (VIEW) - Load users from DB and render view
 exports.getStaffList = async (req, res) => {

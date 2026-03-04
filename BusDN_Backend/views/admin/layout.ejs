@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         .sidebar {
-            min-height: 100vh;
+            height: 100vh;
             background-color: #343a40;
             color: white;
         }
@@ -30,8 +30,10 @@
         }
 
         .main-content {
+            flex-grow: 1;
+            overflow-y: auto;
             background-color: #f8f9fa;
-            min-height: 100vh;
+            height: 100vh;
             padding: 20px;
         }
 

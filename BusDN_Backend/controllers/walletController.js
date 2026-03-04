@@ -1,6 +1,6 @@
 const crypto = require("crypto");
 const querystring = require("querystring");
-const { User, WalletTransaction, MonthlyPass } = require("../models");
+const { User, WalletTransaction, MonthlyPass } = require("../models/models");
 
 /* =========================
    Helpers

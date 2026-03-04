@@ -1,5 +1,5 @@
-const { Stop } = require('../models');
-
+const { Stop } = require('../models/models');
+const { renderAdmin } = require('../middleware/renderAdmin');
 // ===============================
 // Helpers
 // ===============================
@@ -41,29 +41,24 @@ exports.getStopsPage = async (req, res) => {
       .sort({ createdAt: -1, name: 1 })
       .lean();
 
-    return res.render('admin/stops', {
+    return renderAdmin(req, res, 'admin/stops', 'Quản lý trạm dừng', {
       stops,
       success: getFlash(req, 'success'),
       error: getFlash(req, 'error'),
-      filters: {
-        q,
-        status
-      }
+      filters: { q, status },
+      path: 'stops' // Giúp sidebar highlight đúng mục "Trạm dừng"
     });
   } catch (err) {
     console.error('❌ getStopsPage error:', err);
-    return res.render('admin/stops', {
+    return renderAdmin(req, res, 'admin/stops', 'Quản lý trạm dừng', {
       stops: [],
       success: null,
       error: 'Không thể tải danh sách trạm dừng.',
-      filters: {
-        q: '',
-        status: ''
-      }
+      filters: { q: '', status: '' },
+      path: 'stops' 
     });
-  }
+}
 };
-
 // ===============================
 // POST /admin/stops/create
 // ===============================

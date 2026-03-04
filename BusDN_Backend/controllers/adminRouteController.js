@@ -1,5 +1,5 @@
-const { Route } = require('../models');
-
+const { Route } = require('../models/models');
+const { renderAdmin } = require('../middleware/renderAdmin');
 // ===============================
 // Helpers
 // ===============================
@@ -78,7 +78,7 @@ function validateRouteInput({
 // Hiển thị danh sách tuyến + modal create/edit/detail
 // ===============================
 exports.getRoutesPage = async (req, res) => {
-  console.log(">>> HIT getRoutesPage /admin/routes");
+  console.log('>>> HIT getRoutesPage /admin/routes');
   try {
     const q = clean(req.query.q);
     const status = clean(req.query.status);
@@ -101,25 +101,27 @@ exports.getRoutesPage = async (req, res) => {
       .sort({ routeNumber: 1, createdAt: -1 })
       .lean();
 
-    return res.render('admin/routes', {
+    return renderAdmin(req, res, 'admin/routes', 'Quản lý Tuyến', {
       routes,
       success: getFlash(req, 'success'),
       error: getFlash(req, 'error'),
       filters: {
         q,
         status
-      }
+      },
+      path: 'routes'
     });
   } catch (err) {
     console.error('❌ getRoutesPage error:', err);
-    return res.render('admin/routes', {
+    return renderAdmin(req, res, 'admin/routes', 'Quản lý Tuyến', {
       routes: [],
       success: null,
       error: 'Không thể tải danh sách tuyến.',
       filters: {
         q: '',
         status: ''
-      }
+      },
+      path: 'routes'
     });
   }
 };

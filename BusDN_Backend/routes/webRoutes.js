@@ -2,35 +2,13 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 const { User } = require('../models/models');
-const { checkPassword, PASS_ERR_MSG } = require('../config/helpers');
+const router = express.Router();
+const { checkPassword, PASS_ERR_MSG, sendEmail } = require('../config/helpers');
 const { getAllRoutes, getRouteDetail, getRouteGeoJSON } = require('../controllers/routeController');
 require('dotenv').config();
-// This module exports a function that takes upload middleware
+
 module.exports = (upload) => {
-    const router = express.Router();
 
-    // --- NODEMAILER CONFIGURATION ---
-    const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASS
-        }
-    });
-
-    const sendEmail = async (to, subject, htmlContent) => {
-        try {
-            await transporter.sendMail({
-                from: '"BusDN Admin" <nguyennhatminhnau@gmail.com>',
-                to: to,
-                subject: subject,
-                html: htmlContent
-            });
-            console.log(`✅ Đã gửi mail tới ${to}`);
-        } catch (error) {
-            console.error('❌ Lỗi gửi mail:', error);
-        }
-    };
 
     // --- HOME ROUTE ---
     router.get('/home', async (req, res) => {
@@ -176,14 +154,22 @@ module.exports = (upload) => {
     });
 
     // --- PROFILE ---
+    // webRoutes.js - Khoảng dòng 186
     router.get('/profile', async (req, res) => {
         if (!req.session.userId) return res.redirect('/login');
-        const user = await User.findById(req.session.userId);
 
-        const error = req.query.error;
-        const success = req.query.success;
+        try {
+            const user = await User.findById(req.session.userId); // Lấy data từ DB
 
-        res.render('profile', { user: req.user, error, success });
+            const error = req.query.error;
+            const success = req.query.success;
+
+            // ĐỔI req.user THÀNH user
+            res.render('profile', { user: user, error, success });
+        } catch (err) {
+            console.error(err);
+            res.redirect('/home');
+        }
     });
 
     // --- UPLOAD AVATAR ---
@@ -249,4 +235,5 @@ module.exports = (upload) => {
     router.get('/api/public/routes/:routeId/geojson', getRouteGeoJSON);
 
     return router;
+
 };
