@@ -1,10 +1,12 @@
 const { User } = require('../models/models');
+const { getPendingPriorityCount } = require('../utils/priorityUtils');
 
 // Helper function to render admin views with layout
 const renderAdmin = async (req, res, view, title, data = {}) => {
     try {
         const currentUser = await User.findById(req.session.userId);
         const pageName = view.split('/').pop();
+        const pendingCount = await getPendingPriorityCount();
 
         const defaultData = {
             pendingCount: 0,
@@ -22,22 +24,23 @@ const renderAdmin = async (req, res, view, title, data = {}) => {
 
         const backUrl = req.get('referer') || '';
 
-        res.render(view, { ...defaultData, ...data }, (err, html) => {
+        return res.render(view, { ...defaultData, ...data }, (err, html) => {
             if (err) {
                 console.error('Error rendering view:', err);
                 return res.status(500).send(`<h1>Lỗi hiển thị trang</h1><p>${err.message}</p>`);
             }
-            res.render('admin/layout', {
+            return res.render('admin/layout', {
                 body: html,
                 title: title,
                 path: data.path || pageName, // Đồng bộ path ra layout
                 user: currentUser,
-                backUrl
+                backUrl,
+                pendingCount
             });
         });
     } catch (e) {
         console.error('Error in renderAdmin:', e);
-        res.redirect('/login');
+        return res.redirect('/login');
     }
 };
 

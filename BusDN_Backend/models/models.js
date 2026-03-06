@@ -2,10 +2,18 @@ const mongoose = require('mongoose');
 
 // --- 1. NGƯỜI DÙNG (USER) ---
 const UserSchema = new mongoose.Schema({
-    email: { type: String, required: true, unique: true, trim: true },
+    email: { type: String, required: false, unique: true, sparse: true, trim: true },
     password: { type: String, required: true },
     fullName: { type: String, default: "Hành khách" },
-    phone: { type: String },
+    phone: {
+        type: String,
+        trim: true,
+        unique: true,
+        sparse: true,
+        required: function () {
+            return !this.email;
+        }
+    },
     avatar: { type: String, default: "/images/default-avatar.png" },
     role: {
         type: String,
@@ -14,8 +22,21 @@ const UserSchema = new mongoose.Schema({
     },
     isVerified: { type: Boolean, default: false },
     isLocked: { type: Boolean, default: false },
+    status: {
+        type: String,
+        enum: ['ACTIVE', 'LOCKED'],
+        default: 'ACTIVE'
+    },
+    isFirstLogin: { type: Boolean, default: true },
     otp_code: String,
     otp_expires: Date,
+    resetToken: { type: String, default: null },
+    isPriorityGroup: { type: Boolean, default: false },
+    priorityStatus: {
+        type: String,
+        enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED', 'EXPIRED'],
+        default: 'NONE'
+    },
 
     // Tài chính (Từ Model 2)
     walletBalance: { type: Number, default: 0 },
@@ -27,12 +48,23 @@ const UserSchema = new mongoose.Schema({
         cardNumber: String,
         status: {
             type: String,
-            enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED'],
+            enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED', 'EXPIRED'],
             default: 'NONE'
         },
         expiryDate: Date
     }
 }, { timestamps: true });
+
+UserSchema.pre('save', async function () { // Bỏ next
+    if (this.status === 'LOCKED') {
+        this.isLocked = true;
+    } else if (this.status === 'ACTIVE') {
+        this.isLocked = false;
+    } else if (this.isModified('isLocked')) {
+        this.status = this.isLocked ? 'LOCKED' : 'ACTIVE';
+    }
+    // Không gọi next() nữa, chỉ cần kết thúc hàm là xong
+});
 
 // --- 2. ĐIỂM DỪNG (STOP) ---
 const StopSchema = new mongoose.Schema({
@@ -117,6 +149,29 @@ const PriorityProfileSchema = new mongoose.Schema({
     expiryDate: { type: Date, default: null }
 }, { timestamps: true });
 
+const PriorityHistorySchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    profileId: { type: mongoose.Schema.Types.ObjectId, ref: 'PriorityProfile', required: true },
+    action: {
+        type: String,
+        enum: ['REJECTED'],
+        default: 'REJECTED'
+    },
+    rejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    reason: { type: String, required: true },
+    timestamp: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+const PhoneVerificationSchema = new mongoose.Schema({
+    phone: { type: String, required: true, unique: true, trim: true },
+    firebaseUid: { type: String, default: null },
+    verifiedAt: { type: Date, default: Date.now },
+    expiresAt: { type: Date, required: true },
+    consumed: { type: Boolean, default: false }
+}, { timestamps: true });
+
+PhoneVerificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
 // --- 7. GIAO DỊCH VÍ (WALLET TRANSACTION - Model 2) ---
 const WalletTransactionSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -134,6 +189,8 @@ const WalletTransactionSchema = new mongoose.Schema({
     vnpTransactionNo: String,
     bankCode: String,
     payDate: String,
+    originalAmount: { type: Number, default: null },
+    discountAmount: { type: Number, default: 0 },
     relatedMonthlyPassId: { type: mongoose.Schema.Types.ObjectId, ref: 'MonthlyPass', default: null }
 }, { timestamps: true });
 
@@ -151,6 +208,8 @@ const MonthlyPassSchema = new mongoose.Schema({
     validFrom: Date,
     validTo: Date,
     pricePaid: Number,
+    originalPrice: { type: Number, default: null },
+    discountAmount: { type: Number, default: 0 },
     status: {
         type: String,
         enum: ['ACTIVE', 'EXPIRED', 'CANCELLED'],
@@ -169,6 +228,8 @@ module.exports = {
     Bus: mongoose.models.Bus || mongoose.model('Bus', BusSchema),
     Schedule: mongoose.models.Schedule || mongoose.model('Schedule', ScheduleSchema),
     PriorityProfile: mongoose.models.PriorityProfile || mongoose.model('PriorityProfile', PriorityProfileSchema),
+    PriorityHistory: mongoose.models.PriorityHistory || mongoose.model('PriorityHistory', PriorityHistorySchema),
+    PhoneVerification: mongoose.models.PhoneVerification || mongoose.model('PhoneVerification', PhoneVerificationSchema),
     WalletTransaction: mongoose.models.WalletTransaction || mongoose.model('WalletTransaction', WalletTransactionSchema),
     MonthlyPass: mongoose.models.MonthlyPass || mongoose.model('MonthlyPass', MonthlyPassSchema)
 };

@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const authMiddleware = require('../middleware/authMiddleware');
-const { User, Route, Stop } = require('../models/models');
+const { User, Route, Stop, PriorityProfile } = require('../models/models');
 const bcrypt = require('bcryptjs');
+const { emitPendingPriorityCount } = require('../utils/priorityUtils');
 
 /**
  * API Routes for Mobile Clients (Expo/React Native)
@@ -107,6 +108,7 @@ router.post('/user/change-password', authMiddleware, async (req, res) => {
 
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(newPassword, salt);
+        user.isFirstLogin = false;
         await user.save();
 
         res.json({ ok: true, message: 'Cập nhật mật khẩu thành công' });
@@ -143,10 +145,28 @@ router.post('/user/register-priority', authMiddleware, async (req, res) => {
             cardImageBack,
             status: 'PENDING'
         };
+        user.isPriorityGroup = false;
+        user.priorityStatus = 'PENDING';
 
         await user.save();
+        await PriorityProfile.findOneAndUpdate(
+            { userId: user._id },
+            {
+                userId: user._id,
+                category: type || 'Other',
+                idNumber: cardNumber || 'N/A',
+                idCardImageFront: cardImageFront || '',
+                idCardImageBack: cardImageBack || '',
+                proofImage: cardImageFront || '',
+                status: 'pending',
+                rejectionReason: null,
+                expiryDate: null
+            },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+        await emitPendingPriorityCount();
 
-        res.json({
+        return res.json({
             ok: true,
             message: 'Đơn đăng ký ưu tiên đang chờ xác nhận',
             priorityProfile: user.priorityProfile

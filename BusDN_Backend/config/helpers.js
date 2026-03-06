@@ -28,7 +28,7 @@ const transporter = nodemailer.createTransport({
 const sendEmail = async (to, subject, htmlContent) => {
     try {
         await transporter.sendMail({
-            from: '"BusDN Admin"',
+            from: '"BusDN Admin" <nguyennhatminhnau@gmail.com>',
             to,
             subject,
             html: htmlContent
@@ -75,6 +75,14 @@ const routeListRedirect = (res, type, message) => {
     return res.redirect("/admin/routes?" + q.toString());
 };
 
+const generateOTP = () => {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
+const generateResetToken = () => {
+    return require('crypto').randomBytes(32).toString('hex');
+};
+
 module.exports = { 
     parseRoutePayload, 
     validateRoutePayload, 
@@ -82,4 +90,6 @@ module.exports = {
     checkPassword,
     PASS_ERR_MSG,
     sendEmail,
-    formatDate };
+    formatDate,
+    generateOTP,
+    generateResetToken };

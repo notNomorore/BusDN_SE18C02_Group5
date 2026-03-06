@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đăng ký - Bước 1</title>
+    <style>
+        body { margin:0; min-height:100vh; display:grid; place-items:center; font-family:Segoe UI,sans-serif; background:linear-gradient(140deg,#dbeafe,#e0f2fe,#eff6ff); }
+        .card { width:min(460px,92vw); padding:26px; border-radius:18px; background:rgba(255,255,255,.9); border:1px solid #dbe7ff; box-shadow:0 14px 28px rgba(30,64,175,.15); }
+        .title { margin:0 0 6px; color:#1d4ed8; }
+        .sub { margin:0 0 16px; color:#475569; }
+        input { width:100%; padding:12px; border-radius:10px; border:1px solid #cbd5e1; margin:8px 0 14px; }
+        .btn { width:100%; border:none; border-radius:10px; padding:12px; font-weight:700; color:#fff; background:#2563eb; cursor:pointer; }
+        .muted { margin-top:10px; text-align:center; color:#64748b; }
+        .alert { background:#fee2e2; color:#b91c1c; padding:10px; border-radius:10px; margin-bottom:10px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2 class="title">Bước 1: Thông tin cá nhân</h2>
+        <p class="sub">Nhập họ tên để bắt đầu đăng ký</p>
+        <% if (error) { %><div class="alert"><%= error %></div><% } %>
+        <form action="/register-step1" method="POST">
+            <label>Họ tên</label>
+            <input type="text" name="fullName" value="<%= fullName || '' %>" placeholder="Nguyễn Văn A" required>
+            <button class="btn" type="submit">Tiếp tục</button>
+        </form>
+        <div class="muted">Đã có tài khoản? <a href="/login">Đăng nhập</a></div>
+    </div>
+</body>
+</html>

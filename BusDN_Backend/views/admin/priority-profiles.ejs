@@ -1,221 +1,185 @@
 <style>
-    /* BỌC TOÀN BỘ CSS TRONG CLASS CHA .admin-priority-wrapper */
-    .admin-priority-wrapper {
-        padding: 20px;
-        background-color: #f4f7f6;
-        min-height: 100vh;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    .priority-wrap {
+        background: #f5f8fc;
+        border-radius: 14px;
+        padding: 16px;
     }
 
-    .admin-priority-wrapper .page-header {
+    .priority-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 30px;
-        background-color: white;
-        padding: 20px;
-        border-radius: 8px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        margin-bottom: 14px;
     }
 
-    .admin-priority-wrapper .page-header h1 {
-        margin: 0;
-        color: #003366 !important;
-        /* Dùng !important để tránh bị ghi đè ngược */
-        font-size: 28px;
-    }
-
-    .admin-priority-wrapper .filter-btn {
-        padding: 8px 16px;
-        border: 2px solid #ddd;
-        background-color: white;
-        border-radius: 5px;
-        cursor: pointer;
-        font-weight: 500;
-        transition: all 0.3s;
+    .priority-chip {
+        border-radius: 999px;
+        padding: 6px 12px;
+        border: 1px solid #d4d9e2;
         text-decoration: none;
-        color: #333;
+        color: #243042;
+        font-weight: 600;
     }
 
-    .admin-priority-wrapper .filter-btn.active {
-        background-color: #003366;
-        color: white;
-        border-color: #003366;
-    }
-
-    .admin-priority-wrapper .stats-row {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 20px;
-        margin-bottom: 30px;
-    }
-
-    .admin-priority-wrapper .stat-card {
-        background: white;
-        padding: 20px;
-        border-radius: 8px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        border-left: 4px solid;
-    }
-
-    /* ĐỊNH NGHĨA TABLE CÓ CLASS CHA ĐỂ KHÔNG LÀM VỠ HEADER */
-    .admin-priority-wrapper table {
-        width: 100%;
-        border-collapse: collapse;
-        background: white;
-    }
-
-    .admin-priority-wrapper th {
-        padding: 15px;
-        text-align: left;
-        background-color: #f8f9fa;
-        border-bottom: 2px solid #ddd;
-        color: #333;
-    }
-
-    .admin-priority-wrapper td {
-        padding: 15px;
-        border-bottom: 1px solid #eee;
-    }
-
-    /* Modal styles */
-    .modal-overlay {
-        display: none;
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(0, 0, 0, 0.5);
-        z-index: 9999;
-        /* Đảm bảo nổi trên cùng */
-        align-items: center;
-        justify-content: center;
+    .priority-chip.active {
+        background: #1d4ed8;
+        color: #fff;
+        border-color: #1d4ed8;
     }
 </style>
 
-<div class="admin-priority-wrapper">
-    <div class="page-header">
-        <h1><i class="fas fa-id-card me-3"></i> Priority Profile Management</h1>
-    </div>
-
-    <div style="margin-bottom: 20px;">
-        <div class="filter-buttons" style="display: flex; gap: 10px;">
-            <a href="/priority/admin/profiles"
-                class="filter-btn <%= currentStatus === 'pending' ? 'active' : '' %>">Pending</a>
-            <a href="/priority/admin/profiles?status=approved"
-                class="filter-btn <%= currentStatus === 'approved' ? 'active' : '' %>">Approved</a>
-            <a href="/priority/admin/profiles?status=rejected"
-                class="filter-btn <%= currentStatus === 'rejected' ? 'active' : '' %>">Rejected</a>
+<div class="priority-wrap">
+    <div class="priority-header">
+        <h2 class="h4 mb-0"><i class="fas fa-id-card me-2 text-primary"></i>Priority Profiles</h2>
+        <div class="d-flex gap-2">
+            <a href="/admin/priority-profiles" class="priority-chip <%= currentStatus === 'pending' ? 'active' : '' %>">Pending</a>
+            <a href="/admin/priority-profiles?status=approved" class="priority-chip <%= currentStatus === 'approved' ? 'active' : '' %>">Approved</a>
+            <a href="/admin/priority-profiles?status=rejected" class="priority-chip <%= currentStatus === 'rejected' ? 'active' : '' %>">Rejected</a>
         </div>
     </div>
 
-    <div class="stats-row">
-        <div class="stat-card" style="border-left-color: #ffc107;">
-            <div class="stat-label">Pending</div>
-            <div class="stat-value" style="font-size: 24px; font-weight: bold;">
-                <%= profiles.filter(p=> p.status === 'pending').length %>
-            </div>
-        </div>
-        <div class="stat-card" style="border-left-color: #28a745;">
-            <div class="stat-label">Approved</div>
-            <div class="stat-value" style="font-size: 24px; font-weight: bold;">
-                <%= profiles.filter(p=> p.status === 'approved').length %>
-            </div>
-        </div>
-    </div>
-
-    <div class="table-responsive"
-        style="background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-        <% if (profiles.length===0) { %>
-            <p style="padding: 40px; text-align: center; color: #999;">No priority profiles found.</p>
-            <% } else { %>
-                <table>
-                    <thead>
+    <% if (!profiles || profiles.length === 0) { %>
+        <div class="text-center text-muted py-5">No profiles found.</div>
+    <% } else { %>
+        <div class="table-responsive bg-white rounded shadow-sm">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>User</th>
+                        <th>Category</th>
+                        <th>Status</th>
+                        <th>Submitted</th>
+                        <th class="text-center">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% profiles.forEach(profile => { %>
                         <tr>
-                            <th>User</th>
-                            <th>Category</th>
-                            <th>Status</th>
-                            <th>Actions</th>
+                            <td>
+                                <div class="fw-semibold"><%= profile.userId?.fullName || 'N/A' %></div>
+                                <small class="text-muted"><%= profile.userId?.email || profile.userId?.phone || 'N/A' %></small>
+                            </td>
+                            <td><%= profile.category %></td>
+                            <td>
+                                <span class="badge <%= profile.status === 'approved' ? 'bg-success' : profile.status === 'rejected' ? 'bg-danger' : 'bg-warning text-dark' %>">
+                                    <%= profile.status.toUpperCase() %>
+                                </span>
+                            </td>
+                            <td><small class="text-muted"><%= new Date(profile.createdAt).toLocaleDateString('vi-VN') %></small></td>
+                            <td class="text-center">
+                                <a href="/admin/priority-profiles/<%= profile._id %>" class="btn btn-outline-primary btn-sm">View</a>
+                                <% if (profile.status === 'pending') { %>
+                                    <button class="btn btn-success btn-sm" onclick="approveProfile('<%= profile._id %>')">Approve</button>
+                                    <button class="btn btn-danger btn-sm" onclick="rejectProfile('<%= profile._id %>')">Reject</button>
+                                <% } %>
+                            </td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        <% profiles.forEach(profile=> { %>
-                            <tr>
-                                <td>
-                                    <strong>
-                                        <%= profile.userId.fullName %>
-                                    </strong><br>
-                                    <small>
-                                        <%= profile.userId.email %>
-                                    </small>
-                                </td>
-                                <td>
-                                    <%= profile.category %>
-                                </td>
-                                <td><span class="status-badge <%= profile.status %>">
-                                        <%= profile.status %>
-                                    </span></td>
-                                <td>
-                                    <div style="display: flex; gap: 5px;">
-                                        <a href="/priority/admin/profiles/<%= profile._id %>" class="filter-btn"
-                                            style="font-size: 12px; padding: 5px 10px;">View</a>
-                                        <% if (profile.status==='pending' ) { %>
-                                            <button onclick="approveProfile('<%= profile._id %>')"
-                                                style="background: #28a745; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">Approve</button>
-                                            <button onclick="rejectProfile('<%= profile._id %>')"
-                                                style="background: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">Reject</button>
-                                            <% } %>
-                                    </div>
-                                </td>
-                            </tr>
-                            <% }); %>
-                    </tbody>
-                </table>
-                <% } %>
-    </div>
+                    <% }) %>
+                </tbody>
+            </table>
+        </div>
+    <% } %>
 </div>
 
-<div id="approveModal" class="modal-overlay">
-    <div style="background: white; padding: 30px; border-radius: 8px; width: 90%; max-width: 400px;">
-        <h3>Set Expiry Date</h3>
-        <input type="date" id="expiryDate" style="width: 100%; padding: 10px; margin: 15px 0; border: 1px solid #ddd;">
-        <div style="text-align: right;">
-            <button onclick="closeApproveModal()">Cancel</button>
-            <button onclick="submitApprove()"
-                style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px;">Submit</button>
+<div id="approveModal" class="modal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Approve Profile</h5>
+                <button type="button" class="btn-close" onclick="closeApproveModal()"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label">Expiry date (must be at least 2 years from now)</label>
+                <input type="date" id="expiryDate" class="form-control">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeApproveModal()">Cancel</button>
+                <button type="button" class="btn btn-success" onclick="submitApprove()">Approve</button>
+            </div>
         </div>
     </div>
 </div>
 
-<div id="rejectModal" class="modal-overlay">
-    <div style="background: white; padding: 30px; border-radius: 8px; width: 90%; max-width: 400px;">
-        <h3>Rejection Reason</h3>
-        <textarea id="rejectionReason"
-            style="width: 100%; height: 100px; padding: 10px; margin: 15px 0; border: 1px solid #ddd;"></textarea>
-        <div style="text-align: right;">
-            <button onclick="closeRejectModal()">Cancel</button>
-            <button onclick="submitReject()"
-                style="background: #dc3545; color: white; border: none; padding: 8px 15px; border-radius: 4px;">Submit</button>
+<div id="rejectModal" class="modal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Reject Profile</h5>
+                <button type="button" class="btn-close" onclick="closeRejectModal()"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label">Reason</label>
+                <textarea id="rejectionReason" class="form-control" rows="4"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeRejectModal()">Cancel</button>
+                <button type="button" class="btn btn-danger" onclick="submitReject()">Reject</button>
+            </div>
         </div>
     </div>
 </div>
 
 <script>
-    // Giữ nguyên phần script của bạn, chỉ thêm logic hiển thị flex cho modal
     let currentProfileId = null;
+
+    function getMinExpiryDateString() {
+        const d = new Date();
+        d.setFullYear(d.getFullYear() + 2);
+        return d.toISOString().split('T')[0];
+    }
 
     function approveProfile(profileId) {
         currentProfileId = profileId;
-        document.getElementById('approveModal').style.display = 'flex';
+        const input = document.getElementById('expiryDate');
+        const min = getMinExpiryDateString();
+        input.min = min;
+        input.value = min;
+        document.getElementById('approveModal').style.display = 'block';
     }
-    function closeApproveModal() { document.getElementById('approveModal').style.display = 'none'; }
+
+    function closeApproveModal() {
+        document.getElementById('approveModal').style.display = 'none';
+    }
+
+    function submitApprove() {
+        const expiryDate = document.getElementById('expiryDate').value;
+        if (!expiryDate) return;
+        fetch(`/admin/priority-profiles/${currentProfileId}/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ expiryDate })
+        })
+        .then(res => res.json())
+        .then((data) => {
+            if (!data.success) throw new Error(data.error || 'Approve failed');
+            window.location.reload();
+        })
+        .catch((err) => alert(err.message));
+    }
 
     function rejectProfile(profileId) {
         currentProfileId = profileId;
-        document.getElementById('rejectModal').style.display = 'flex';
+        document.getElementById('rejectionReason').value = '';
+        document.getElementById('rejectModal').style.display = 'block';
     }
-    function closeRejectModal() { document.getElementById('rejectModal').style.display = 'none'; }
 
-    // Các hàm fetch dữ liệu (submitApprove, submitReject) giữ nguyên như cũ...
+    function closeRejectModal() {
+        document.getElementById('rejectModal').style.display = 'none';
+    }
+
+    function submitReject() {
+        const rejectionReason = document.getElementById('rejectionReason').value.trim();
+        if (!rejectionReason) return;
+        fetch(`/admin/priority-profiles/${currentProfileId}/reject`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rejectionReason })
+        })
+        .then(res => res.json())
+        .then((data) => {
+            if (!data.success) throw new Error(data.error || 'Reject failed');
+            window.location.reload();
+        })
+        .catch((err) => alert(err.message));
+    }
 </script>

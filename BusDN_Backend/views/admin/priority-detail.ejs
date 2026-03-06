@@ -440,7 +440,7 @@
                 <button class="btn btn-danger" onclick="rejectProfile()">
                     <i class="fas fa-times-circle"></i> Reject Profile
                 </button>
-                <a href="/priority/admin/profiles" class="btn btn-secondary">
+                <a href="/admin/priority-profiles" class="btn btn-secondary">
                     <i class="fas fa-arrow-left"></i> Back to List
                 </a>
             </div>
@@ -448,7 +448,7 @@
     <% } else { %>
         <div class="detail-card">
             <div class="action-section">
-                <a href="/priority/admin/profiles" class="btn btn-secondary">
+                <a href="/admin/priority-profiles" class="btn btn-secondary">
                     <i class="fas fa-arrow-left"></i> Back to List
                 </a>
             </div>
@@ -468,7 +468,7 @@
 <div id="approveModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
     <div style="background: white; padding: 30px; border-radius: 8px; max-width: 400px;">
         <h3 style="margin-top: 0; color: #003366;">Approve Priority Profile</h3>
-        <p>Set the expiry date for this profile (default: 2 years from today):</p>
+        <p>Set the expiry date for this profile (minimum 2 years from approval date):</p>
         <div style="margin: 20px 0;">
             <label style="display: block; margin-bottom: 8px; font-weight: 600;">Expiry Date</label>
             <input type="date" id="expiryDate" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
@@ -517,9 +517,12 @@
 
     // Approve Modal
     function approveProfile() {
-        const tomorrow = new Date();
-        tomorrow.setFullYear(tomorrow.getFullYear() + 2);
-        document.getElementById('expiryDate').valueAsDate = tomorrow;
+        const minDate = '<%= minExpiryDate || "" %>';
+        const expiryInput = document.getElementById('expiryDate');
+        if (minDate) {
+            expiryInput.min = minDate;
+            expiryInput.value = minDate;
+        }
         document.getElementById('approveModal').style.display = 'flex';
     }
 
@@ -530,11 +533,11 @@
     function submitApprove() {
         const expiryDate = document.getElementById('expiryDate').value;
         if (!expiryDate) {
-            alert('Please select an expiry date');
+            Swal.fire({ icon: 'warning', title: 'Missing data', text: 'Please select an expiry date' });
             return;
         }
 
-        fetch(`/priority/admin/profiles/${profileId}/approve`, {
+        fetch(`/admin/priority-profiles/${profileId}/approve`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ expiryDate })
@@ -542,13 +545,13 @@
         .then(res => res.json())
         .then(data => {
             if (data.success) {
-                alert('Profile approved successfully');
-                location.href = '/priority/admin/profiles';
+                Swal.fire({ icon: 'success', title: 'Success', text: 'Profile approved successfully' })
+                    .then(() => { location.href = '/admin/priority-profiles'; });
             } else {
-                alert('Error: ' + data.error);
+                Swal.fire({ icon: 'error', title: 'Error', text: data.error || 'Approval failed' });
             }
         })
-        .catch(err => alert('Error: ' + err));
+        .catch(err => Swal.fire({ icon: 'error', title: 'Error', text: String(err) }));
     }
 
     // Reject Modal
@@ -563,11 +566,11 @@
     function submitReject() {
         const rejectionReason = document.getElementById('rejectionReason').value;
         if (!rejectionReason) {
-            alert('Please enter a rejection reason');
+            Swal.fire({ icon: 'warning', title: 'Missing data', text: 'Please enter a rejection reason' });
             return;
         }
 
-        fetch(`/priority/admin/profiles/${profileId}/reject`, {
+        fetch(`/admin/priority-profiles/${profileId}/reject`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ rejectionReason })
@@ -575,12 +578,12 @@
         .then(res => res.json())
         .then(data => {
             if (data.success) {
-                alert('Profile rejected successfully');
-                location.href = '/priority/admin/profiles';
+                Swal.fire({ icon: 'success', title: 'Success', text: 'Profile rejected successfully' })
+                    .then(() => { location.href = '/admin/priority-profiles'; });
             } else {
-                alert('Error: ' + data.error);
+                Swal.fire({ icon: 'error', title: 'Error', text: data.error || 'Reject failed' });
             }
         })
-        .catch(err => alert('Error: ' + err));
+        .catch(err => Swal.fire({ icon: 'error', title: 'Error', text: String(err) }));
     }
 </script>

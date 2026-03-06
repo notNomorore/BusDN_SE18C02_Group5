@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 
 const { isAdmin } = require('../middleware/adminMiddleware');
 const { renderAdmin } = require('../middleware/renderAdmin');
@@ -9,6 +10,7 @@ const adminController = require('../controllers/adminController');
 const priorityController = require('../controllers/priorityController');
 const adminRouteController = require('../controllers/adminRouteController');
 const adminStopController = require('../controllers/adminStopController');  
+const importUpload = multer({ storage: multer.memoryStorage() });
 
 // DASHBOARD & PROFILE
 router.get('/dashboard', isAdmin, (req, res) => renderAdmin(req, res, 'admin/dashboard', 'Tổng quan'));
@@ -40,9 +42,11 @@ router.post('/priority-profiles/:profileId/approve', isAdmin, priorityController
 router.post('/priority-profiles/:profileId/reject', isAdmin, priorityController.rejectProfile);
 
 // NHÂN SỰ
+router.get('/users', isAdmin, adminController.getStaffList);
 router.get('/staff', isAdmin, adminController.getStaffList);
 router.get('/staff/create', isAdmin, adminController.getCreateStaff);
 router.post('/staff/create', isAdmin, adminController.createStaff);
+router.post('/staff/import', isAdmin, importUpload.single('staffFile'), adminController.importStaff);
 router.post('/staff/:userId/toggle-lock', isAdmin, adminController.toggleLock);
 
 module.exports = router;

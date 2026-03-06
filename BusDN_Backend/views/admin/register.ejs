@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - BusDN VIP PRO</title>
+    <link rel="stylesheet" href="/css/auth-style.css">
+    <style>
+        .password-tooltip {
+            display: none;
+            margin-top: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 10px;
+            padding: 10px 12px;
+            font-size: 12px;
+            background: rgba(0, 0, 0, 0.28);
+        }
+
+        .password-tooltip.show {
+            display: block;
+        }
+
+        .rule {
+            color: rgba(255, 255, 255, 0.78);
+            margin-top: 4px;
+        }
+
+        .rule.valid {
+            color: #9ff3b0;
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-wrapper" style="background-image: url('https://images.unsplash.com/photo-1506057585558-8cf8f8d9f4e4?auto=format&fit=crop&w=1920&q=80');">
+        <div class="glass-form">
+            <span class="brand-tag">VIP PRO</span>
+            <h1 class="auth-title">Register</h1>
+            <p class="auth-subtitle">Create your BusDN account in a few steps.</p>
+
+            <% if (error) { %>
+                <div class="auth-alert error"><%= error %></div>
+            <% } %>
+            <% if (success) { %>
+                <div class="auth-alert success"><%= success %></div>
+            <% } %>
+
+            <form action="/register" method="POST" id="registerForm">
+                <div class="auth-field">
+                    <label for="fullName">Full name</label>
+                    <input id="fullName" name="fullName" type="text" placeholder="Nguyen Van A" required>
+                </div>
+                <div class="auth-field">
+                    <label for="email">Email</label>
+                    <input id="email" name="email" type="email" placeholder="example@busdn.com" required>
+                </div>
+                <div class="auth-field">
+                    <label for="phone">Phone</label>
+                    <input id="phone" name="phone" type="tel" placeholder="+84..." required>
+                </div>
+
+                <div class="auth-field">
+                    <label>Phone verification</label>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="auth-submit" id="sendPhoneOtpBtn" style="width:auto; border-radius:10px; text-transform:none;">Send OTP</button>
+                        <input id="phoneOtp" type="text" placeholder="OTP code" style="flex:1;" />
+                        <button type="button" class="auth-submit" id="verifyPhoneOtpBtn" style="width:auto; border-radius:10px; text-transform:none;">Verify</button>
+                    </div>
+                    <div id="recaptcha-container" style="margin-top:8px;"></div>
+                    <div id="phoneStatus" class="auth-subtitle" style="margin-top:8px;">Phone not verified</div>
+                    <input type="hidden" id="firebasePhoneVerified" name="firebasePhoneVerified" value="false">
+                </div>
+
+                <div class="auth-field">
+                    <label for="password">Password</label>
+                    <input id="password" name="password" type="password" placeholder="••••••••" required>
+                    <div id="passwordTooltip" class="password-tooltip">
+                        <strong>Password rules</strong>
+                        <div class="rule" id="req-length">At least 8 characters</div>
+                        <div class="rule" id="req-upper">At least 1 uppercase letter</div>
+                        <div class="rule" id="req-lower">At least 1 lowercase letter</div>
+                        <div class="rule" id="req-number">At least 1 number</div>
+                        <div class="rule" id="req-special">At least 1 special char (@$!%*?&)</div>
+                    </div>
+                </div>
+                <div class="auth-field">
+                    <label for="confirmPassword">Confirm password</label>
+                    <input id="confirmPassword" name="confirmPassword" type="password" placeholder="••••••••" required>
+                </div>
+                <button class="auth-submit" type="submit" id="submitBtn" disabled>Register</button>
+            </form>
+
+            <p class="auth-footnote">
+                Already have an account? <a href="/login" class="auth-link">Login</a>
+            </p>
+        </div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+    <script>
+        const firebaseConfig = <%- JSON.stringify(firebaseConfig || {}) %>;
+        const hasFirebase = !!(firebaseConfig.apiKey && firebaseConfig.authDomain && firebaseConfig.projectId && firebaseConfig.appId);
+
+        const passwordInput = document.getElementById('password');
+        const confirmPasswordInput = document.getElementById('confirmPassword');
+        const submitBtn = document.getElementById('submitBtn');
+        const tooltip = document.getElementById('passwordTooltip');
+        const phoneStatus = document.getElementById('phoneStatus');
+        const firebasePhoneVerifiedInput = document.getElementById('firebasePhoneVerified');
+        const sendPhoneOtpBtn = document.getElementById('sendPhoneOtpBtn');
+        const verifyPhoneOtpBtn = document.getElementById('verifyPhoneOtpBtn');
+        const phoneInput = document.getElementById('phone');
+        const phoneOtpInput = document.getElementById('phoneOtp');
+
+        const requirements = {
+            length: document.getElementById('req-length'),
+            upper: document.getElementById('req-upper'),
+            lower: document.getElementById('req-lower'),
+            number: document.getElementById('req-number'),
+            special: document.getElementById('req-special')
+        };
+
+        let confirmationResult = null;
+        let firebasePhoneVerified = false;
+
+        function updateSubmitState() {
+            const password = passwordInput.value;
+            const confirmPassword = confirmPasswordInput.value;
+            const checks = {
+                length: password.length >= 8,
+                upper: /[A-Z]/.test(password),
+                lower: /[a-z]/.test(password),
+                number: /\d/.test(password),
+                special: /[@$!%*?&]/.test(password)
+            };
+
+            Object.keys(checks).forEach((key) => {
+                requirements[key].classList.toggle('valid', checks[key]);
+            });
+
+            const allValid = Object.values(checks).every(Boolean);
+            const matched = password.length > 0 && password === confirmPassword;
+            submitBtn.disabled = !(allValid && matched && firebasePhoneVerified);
+        }
+
+        passwordInput.addEventListener('focus', () => tooltip.classList.add('show'));
+        passwordInput.addEventListener('blur', () => {
+            if (!passwordInput.value) tooltip.classList.remove('show');
+        });
+        passwordInput.addEventListener('input', updateSubmitState);
+        confirmPasswordInput.addEventListener('input', updateSubmitState);
+
+        async function persistVerifiedPhone(phone, firebaseUid) {
+            const response = await fetch('/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    phoneVerifiedOnly: true,
+                    phone,
+                    firebaseUid,
+                    firebasePhoneVerified: true
+                })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.ok) {
+                throw new Error(data.message || 'Cannot persist verified phone');
+            }
+        }
+
+        async function onSignInSubmit() {
+            if (!hasFirebase) return;
+            try {
+                const phone = phoneInput.value.trim();
+                if (!phone) {
+                    phoneStatus.textContent = 'Please input phone number';
+                    return;
+                }
+
+                const appVerifier = window.recaptchaVerifier;
+                confirmationResult = await firebase.auth().signInWithPhoneNumber(phone, appVerifier);
+                phoneStatus.textContent = 'OTP sent to phone';
+            } catch (err) {
+                phoneStatus.textContent = err.message || 'Cannot send OTP';
+            }
+        }
+
+        async function verifyOtpCode() {
+            try {
+                const code = phoneOtpInput.value.trim();
+                if (!confirmationResult || !code) return;
+
+                const result = await confirmationResult.confirm(code);
+                const verifiedPhone = result?.user?.phoneNumber || phoneInput.value.trim();
+                const firebaseUid = result?.user?.uid || null;
+
+                await persistVerifiedPhone(verifiedPhone, firebaseUid);
+
+                firebasePhoneVerified = true;
+                firebasePhoneVerifiedInput.value = 'true';
+                phoneStatus.textContent = 'Phone verified and saved successfully';
+                updateSubmitState();
+            } catch (err) {
+                firebasePhoneVerified = false;
+                firebasePhoneVerifiedInput.value = 'false';
+                phoneStatus.textContent = err.message || 'OTP verification failed';
+                updateSubmitState();
+            }
+        }
+
+        window.onSignInSubmit = onSignInSubmit;
+
+        if (!hasFirebase) {
+            sendPhoneOtpBtn.disabled = true;
+            verifyPhoneOtpBtn.disabled = true;
+            phoneStatus.textContent = 'Firebase config missing in .env';
+        } else {
+            firebase.initializeApp(firebaseConfig);
+            window.recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptcha-container', {
+                size: 'normal'
+            });
+            window.recaptchaVerifier.render();
+
+            sendPhoneOtpBtn.addEventListener('click', onSignInSubmit);
+            verifyPhoneOtpBtn.addEventListener('click', verifyOtpCode);
+        }
+    </script>
+</body>
+</html>

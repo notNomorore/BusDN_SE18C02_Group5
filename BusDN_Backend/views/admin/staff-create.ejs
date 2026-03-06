@@ -1,7 +1,7 @@
 <div class="d-flex justify-content-between align-items-center pb-2 mb-3 border-bottom">
-    <h1 class="h2"><i class="fas fa-user-plus me-2 text-primary"></i> Tạo Tài Khoản Nhân Viên</h1>
+    <h1 class="h2"><i class="fas fa-user-plus me-2 text-primary"></i> Tao Tai Khoan Nhan Vien</h1>
     <a href="/admin/staff" class="btn btn-outline-secondary btn-sm">
-        <i class="fas fa-arrow-left me-1"></i> Quay lại danh sách
+        <i class="fas fa-arrow-left me-1"></i> Quay lai danh sach
     </a>
 </div>
 
@@ -9,95 +9,75 @@
     <div class="col-md-7">
         <div class="card shadow-sm">
             <div class="card-header bg-primary text-white fw-bold">
-                <i class="fas fa-id-card me-2"></i> Thông tin tài khoản mới
+                <i class="fas fa-id-card me-2"></i> Thong tin tai khoan moi
             </div>
             <div class="card-body p-4">
-
                 <% if (error) { %>
-                    <div class="alert alert-danger d-flex align-items-center" role="alert">
-                        <i class="fas fa-exclamation-circle me-2"></i>
-                        <%= error %>
+                    <div class="alert alert-danger"><%= error %></div>
+                <% } %>
+
+                <% if (success) { %>
+                    <div class="alert alert-success"><%= success %></div>
+                <% } %>
+
+                <form method="POST" action="/admin/staff/create">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Ho va ten <span class="text-danger">*</span></label>
+                        <input type="text" name="fullName" class="form-control" placeholder="VD: Nguyen Van A" required>
                     </div>
-                    <% } %>
-                        <% if (success) { %>
-                            <div class="alert alert-success d-flex align-items-center" role="alert">
-                                <i class="fas fa-check-circle me-2"></i>
-                                <%= success %>
-                            </div>
-                            <% } %>
 
-                                <form method="POST" action="/admin/staff/create">
-                                    <div class="mb-3">
-                                        <label class="form-label fw-semibold">Họ và tên <span
-                                                class="text-danger">*</span></label>
-                                        <input type="text" name="fullName" class="form-control"
-                                            placeholder="VD: Nguyễn Văn A" required>
-                                    </div>
-                                    <div class="mb-3">
-                                        <label class="form-label fw-semibold">Email <span
-                                                class="text-danger">*</span></label>
-                                        <input type="email" name="email" class="form-control"
-                                            placeholder="email@example.com" required>
-                                    </div>
-                                    <div class="mb-3">
-                                        <label class="form-label fw-semibold">Mật khẩu <span
-                                                class="text-danger">*</span></label>
-                                        <div class="input-group">
-                                            <input type="password" name="password" id="staffPassword"
-                                                class="form-control" placeholder="Mật khẩu đăng nhập" required
-                                                minlength="4">
-                                            <button class="btn btn-outline-secondary" type="button"
-                                                onclick="togglePwd('staffPassword', this)">
-                                                <i class="fas fa-eye"></i>
-                                            </button>
-                                        </div>
-                                        <div class="form-text text-muted small">
-                                            Ít nhất 4 ký tự, 1 chữ hoa, 1 số, 1 ký tự đặc biệt, không có khoảng trắng.
-                                        </div>
-                                    </div>
-                                    <div class="mb-3">
-                                        <label class="form-label fw-semibold">Số điện thoại</label>
-                                        <input type="tel" name="phone" class="form-control" placeholder="0xxx xxx xxx">
-                                    </div>
-                                    <div class="mb-4">
-                                        <label class="form-label fw-semibold">Vai trò <span
-                                                class="text-danger">*</span></label>
-                                        <select name="role" class="form-select" required>
-                                            <option value="DRIVER">
-                                                <i class="fas fa-steering-wheel"></i> Tài xế
-                                            </option>
-                                            <option value="CONDUCTOR">Phụ xe</option>
-                                        </select>
-                                        <div class="form-text text-muted small">
-                                            Chỉ có thể tạo tài khoản Tài xế (DRIVER) hoặc Phụ xe (CONDUCTOR).
-                                        </div>
-                                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Email (optional)</label>
+                        <input type="text" name="email" id="staffEmail" class="form-control" placeholder="email@example.com" list="emailSuggestions" autocomplete="off">
+                        <datalist id="emailSuggestions"></datalist>
+                        <div class="form-text">Neu khong co email, co the tao bang so dien thoai.</div>
+                    </div>
 
-                                    <div class="d-grid">
-                                        <button type="submit" class="btn btn-primary btn-lg">
-                                            <i class="fas fa-user-plus me-2"></i> Tạo tài khoản
-                                        </button>
-                                    </div>
-                                </form>
-            </div>
-        </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">So dien thoai (optional)</label>
+                        <input type="tel" name="phone" class="form-control" placeholder="0xxx xxx xxx">
+                        <div class="form-text">Can it nhat email hoac so dien thoai.</div>
+                    </div>
 
-        <!-- Info card -->
-        <div class="card border-0 bg-light mt-3">
-            <div class="card-body small text-muted">
-                <i class="fas fa-info-circle me-1 text-primary"></i>
-                Tài khoản nhân viên sẽ được <strong>kích hoạt ngay</strong> (không cần xác thực email).
-                Nhân viên có thể đăng nhập trên ứng dụng di động BusDN.
+                    <div class="mb-4">
+                        <label class="form-label fw-semibold">Vai tro <span class="text-danger">*</span></label>
+                        <select name="role" class="form-select" required>
+                            <option value="DRIVER">Tai xe</option>
+                            <option value="CONDUCTOR">Phu xe</option>
+                        </select>
+                    </div>
+
+                    <div class="alert alert-info small">
+                        Mat khau tam thoi se duoc sinh tu dong (8-10 ky tu bao gom chu hoa, chu thuong, so va ky tu dac biet).
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="fas fa-user-plus me-2"></i> Tao tai khoan
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
 </div>
 
 <script>
-    function togglePwd(id, btn) {
-        const input = document.getElementById(id);
-        const isText = input.type === 'text';
-        input.type = isText ? 'password' : 'text';
-        btn.innerHTML = `<i class="fas fa-eye${isText ? '' : '-slash'}"></i>`;
-    }
+    (function () {
+        const emailInput = document.getElementById('staffEmail');
+        const datalist = document.getElementById('emailSuggestions');
+
+        if (!emailInput || !datalist) return;
+
+        emailInput.addEventListener('input', function () {
+            const value = (emailInput.value || '').trim();
+            datalist.innerHTML = '';
+
+            if (!value || value.includes('@')) return;
+
+            const option = document.createElement('option');
+            option.value = `${value}@gmail.com`;
+            datalist.appendChild(option);
+        });
+    })();
 </script>

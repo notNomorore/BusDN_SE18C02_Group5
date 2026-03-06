@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Xác Thực OTP - BusDN VIP PRO</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/css/auth-custom.css">
+</head>
+<body class="auth-page">
+    <div class="auth-wrapper">
+        <div class="glass-form">
+            <span class="vip-badge">VIP PRO</span>
+            <h1 class="auth-title">Xác Thực OTP</h1>
+            <p class="auth-subtitle">
+                <%= isPhoneFlow ? 'Xác nhận liên hệ để tiếp tục bước tạo mật khẩu.' : 'Nhập mã xác thực 6 số để tiếp tục.' %>
+            </p>
+            <p class="email-context">
+                <%= isPhoneFlow ? 'Số điện thoại đã xác thực:' : 'Mã đã được gửi đến:' %>
+                <strong><%= email %></strong>
+            </p>
+
+            <% if (error) { %>
+                <div class="auth-alert error"><%= error %></div>
+            <% } %>
+            <% if (success) { %>
+                <div class="auth-alert success"><%= success %></div>
+            <% } %>
+
+            <form action="/verify-otp" method="POST" id="otpForm">
+                <input type="hidden" name="email" value="<%= email %>">
+                <input type="hidden" name="type" value="<%= type %>">
+                <% if (!isPhoneFlow) { %>
+                    <label for="otp" class="auth-label">Mã OTP</label>
+                    <div class="input-with-icon">
+                        <i class="fa-solid fa-key"></i>
+                        <input
+                            id="otp"
+                            name="otp"
+                            class="auth-input otp-input"
+                            type="text"
+                            inputmode="numeric"
+                            maxlength="6"
+                            pattern="\d{6}"
+                            placeholder="000000"
+                            required
+                        >
+                    </div>
+                <% } else { %>
+                    <input type="hidden" id="otp" name="otp" value="PHONE_VERIFIED">
+                    <div class="auth-alert success" style="margin-bottom: 12px;">
+                        <%= phoneVerified ? 'Số điện thoại đã xác thực thành công.' : 'Chưa xác thực số điện thoại.' %>
+                    </div>
+                <% } %>
+
+                <button type="submit" class="auth-btn" id="submitBtn">
+                    <%= isPhoneFlow ? 'Tiếp tục' : 'Xác Thực' %>
+                </button>
+            </form>
+
+            <div class="resend-wrap">
+                <% if (!isPhoneFlow) { %>
+                    <button type="button" class="resend-link" id="resendBtn">Gửi lại mã</button>
+                    <div class="muted-line" id="resendStatus" style="margin-top: 6px;"></div>
+                    <div style="margin-top: 6px;"><a href="/register-step2" class="resend-link">Quay lại bước trước</a></div>
+                <% } else { %>
+                    <a href="/register-step2" class="resend-link">Quay lại bước trước</a>
+                    <div class="muted-line" id="resendStatus" style="margin-top: 6px;"></div>
+                <% } %>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const otpInput = document.getElementById('otp');
+        const otpForm = document.getElementById('otpForm');
+        const resendBtn = document.getElementById('resendBtn');
+        const resendStatus = document.getElementById('resendStatus');
+        const isPhoneFlow = <%- JSON.stringify(!!isPhoneFlow) %>;
+
+        if (!isPhoneFlow && otpInput) {
+            otpInput.addEventListener('input', (e) => {
+                e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6);
+            });
+        }
+
+        otpForm.addEventListener('submit', () => {
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang kiểm tra';
+        });
+
+        if (resendBtn) resendBtn.addEventListener('click', async () => {
+            const email = '<%= email %>';
+            const type = '<%= type %>';
+
+            resendBtn.disabled = true;
+            resendStatus.textContent = 'Đang gửi lại mã...';
+
+            try {
+                const res = await fetch('/resend-otp', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, type })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    resendStatus.textContent = 'Đã gửi lại mã OTP.';
+                    let seconds = 60;
+                    const timer = setInterval(() => {
+                        seconds -= 1;
+                        resendStatus.textContent = `Bạn có thể gửi lại sau ${seconds}s`;
+                        if (seconds <= 0) {
+                            clearInterval(timer);
+                            resendBtn.disabled = false;
+                            resendStatus.textContent = '';
+                        }
+                    }, 1000);
+                } else {
+                    resendStatus.textContent = data.message || 'Không thể gửi lại mã.';
+                    resendBtn.disabled = false;
+                }
+            } catch (err) {
+                resendStatus.textContent = 'Có lỗi xảy ra, vui lòng thử lại.';
+                resendBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

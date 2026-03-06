@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - BusDN VIP PRO</title>
+    <link rel="stylesheet" href="/css/auth-style.css">
+</head>
+<body>
+    <div class="auth-wrapper" style="background-image: url('https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1920&q=80');">
+        <div class="glass-form">
+            <span class="brand-tag">VIP PRO</span>
+            <h1 class="auth-title">Login</h1>
+            <p class="auth-subtitle">Welcome back to BusDN control center.</p>
+
+            <% if (error) { %>
+                <div class="auth-alert error"><%= error %></div>
+            <% } %>
+            <% if (success) { %>
+                <div class="auth-alert success"><%= success %></div>
+            <% } %>
+
+            <form action="/login" method="POST">
+                <div class="auth-field">
+                    <label for="email">Email / Phone</label>
+                    <input id="email" name="email" type="text" placeholder="you@example.com or 09xxxxxxxx" required>
+                </div>
+                <div class="auth-field">
+                    <label for="password">Password</label>
+                    <input id="password" name="password" type="password" placeholder="••••••••" required>
+                </div>
+
+                <div class="auth-row">
+                    <span style="font-size: 13px; color: rgba(255, 255, 255, 0.75);">BusDN Secure Access</span>
+                    <a href="/forgot-password" class="auth-link">Forgot password?</a>
+                </div>
+
+                <button class="auth-submit" type="submit">Login</button>
+            </form>
+
+            <p class="auth-footnote">
+                No account yet? <a href="/register" class="auth-link">Register now</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>

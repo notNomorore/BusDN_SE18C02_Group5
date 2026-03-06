@@ -1,145 +1,67 @@
-# 🚌 BusDN Backend - Route Management System
+# BusDN Backend
 
-## 🎯 Latest Implementation: View/Search Routes
+## Latest Architecture (March 6, 2026)
+- 4-step dynamic registration flow (Gmail style) with `express-session`:
+  - `GET/POST /register-step1` - Identity (`fullName`)
+  - `GET/POST /register-step2` - Single contact field (Email or Phone auto-detect)
+  - `GET/POST /verify-otp` - Verification step for registration and forgot-password
+  - `GET/POST /create-password` - Final account creation from `req.session.regData`
+- Firebase Phone Auth integrated in step 2 with `recaptcha-container` and OTP verify.
+- Registration session state stored in `req.session.regData`:
+  - `fullName`, `contactType`, `contactValue`, `otpCode`, `otpExpires`, `phoneVerified`, `contactVerified`
 
-✅ **Status**: Feature Complete (Feb 27, 2026)
+## Priority and Admin Realtime
+- Socket.io is enabled on server and emits pending-priority updates in realtime.
+- Admin layout updates:
+  - Top bar banner: `Co [X] ho so uu tien dang cho duyet`
+  - Sidebar red exclamation badge on `Duyet ho so`
+- Priority logic:
+  - Approval expiry date must be at least 2 years from approval date.
+  - Auto-expiry middleware runs pre-login/session request path and sets:
+    - `isPriorityGroup = false`
+    - `priorityStatus = EXPIRED`
+- Rejection history is stored in `PriorityHistory` with:
+  - `userId`, `profileId`, `rejectedBy`, `reason`, `timestamp`
 
-### What's New
-- Guest-accessible route lookup system with Leaflet.js mapping
-- Real-time route search by number or name
-- Interactive map display with stop markers and OSRM routing
-- Responsive sidebar with direction toggle (OUTBOUND/INBOUND)
-- Detail panel with route information, stops list, and reviews tabs
+## Discount Logic
+- `applyPriorityDiscount(price, user)` is implemented in `utils/priorityUtils.js`.
+- If `user.isPriorityGroup === true`, purchase flow applies fixed 20% discount.
+- Monthly pass and wallet transaction store:
+  - `originalPrice` / `originalAmount`
+  - `discountAmount`
+  - `pricePaid` final amount
 
-### Quick Links
-- 🔗 Access Route Lookup: http://localhost:3000/route-lookup
-- 📖 **Full Implementation Details**: See [DEV_LOG.md](./DEV_LOG.md)
-- 📡 **API Endpoints**:
-  - `GET /api/public/routes` - Search routes
-  - `GET /api/public/routes/:routeId` - Get route details
+## Main Files
+- `Server.js` - Express + HTTP + Socket.io bootstrap
+- `routes/webRoutes.js` - 4-step registration flow + OTP logic
+- `controllers/priorityController.js` - approval/reject + realtime emit + email notify
+- `controllers/monthlyPassController.js` - priority discount in purchase flow
+- `middleware/priorityEnforcement.js` - auto-expire priority status
+- `utils/priorityUtils.js` - discount + expiry + pending count emit
+- `models/models.js` - `PriorityHistory`, `PhoneVerification`, priority fields
 
----
-
-## 🏗️ Architecture
-
-```
-BusDN_Backend/
-├── controllers/
-│   ├── authController.js      (User authentication)
-│   ├── adminController.js     (Admin features)
-│   └── routeController.js     (🆕 Route lookup logic)
-├── models/
-│   └── models.js              (MongoDB schemas with safety wrappers)
-├── routes/
-│   ├── webRoutes.js           (Web pages + public APIs)
-│   ├── authRoutes.js          (Auth APIs)
-│   └── adminRoutes.js         (Admin panel routes)
-├── views/
-│   ├── route-lookup.ejs       (Route search UI with map)
-│   ├── home.ejs               (Homepage)
-│   ├── login.ejs              (Authentication)
-│   ├── profile.ejs            (User profile)
-│   └── admin/                 (Admin templates)
-└── config/
-    ├── connectdb.js           (MongoDB connection)
-    ├── passport.js            (Auth strategy)
-    ├── multer.js              (File uploads)
-    └── viewEngine.js          (EJS configuration)
-```
-
----
-
-## 📦 Dependencies
-
-**Core Stack**:
-- Node.js + Express 5.2.1
-- MongoDB + Mongoose 9.1.5
-- EJS Templating
-- Passport.js (Google OAuth)
-
-**Frontend Libraries** (CDN):
-- Leaflet.js 1.9.4 (Interactive maps)
-- OpenStreetMap Tiles
-- OSRM (Open Source Routing Machine)
-
----
-
-## 🚀 Getting Started
-
-### Setup
+## Quick Start
 ```bash
 cd BusDN_Backend
 npm install
-# Configure .env with MongoDB connection
 node Server.js
 ```
 
-### Access Points
-- **Homepage**: http://localhost:3000/home
-- **Route Lookup**: http://localhost:3000/route-lookup
-- **Admin Panel**: http://localhost:3000/admin/dashboard
-- **API Base**: http://localhost:3000/api/public
+## Required ENV
+- `MONGO_URI`
+- `SESSION_SECRET`
+- `EMAIL_USER`
+- `EMAIL_PASS`
+- `FIREBASE_API_KEY`
+- `FIREBASE_AUTH_DOMAIN`
+- `FIREBASE_PROJECT_ID`
+- `FIREBASE_STORAGE_BUCKET`
+- `FIREBASE_MESSAGING_SENDER_ID`
+- `FIREBASE_APP_ID`
+- `FIREBASE_MEASUREMENT_ID`
 
----
-
-## 📝 Default Admin Account
-**Email**: nguyennhatminhnau@gmail.com  
-**Role**: ADMIN  
-**Purpose**: System administration and route management
-
----
-
-## 🔒 Security Features
-
-✅ Model Safety: Prevented OverwriteModelError with mongoose model wrapper pattern  
-✅ Password Hashing: bcryptjs for secure storage  
-✅ Email Verification: OTP-based user account validation  
-✅ Session Management: Express-session with secure cookies  
-✅ OAuth Integration: Google Sign-In for convenient login  
-
----
-
-## 🧪 Testing
-
-Run the application and test the route lookup feature:
-1. Navigate to `/route-lookup`
-2. Search for a route (e.g., "01", "Hạ Long")
-3. Click on a route to see it on the map
-4. Toggle between directions (Lượt đi / Lượt về)
-5. View stops, route info, and reviews
-
-**Note**: This requires sample data in the database. Use `seed.js` to populate test routes.
-
----
-
-## 📚 Documentation
-
-For detailed implementation context, architecture decisions, and next steps, see:
-- **[DEV_LOG.md](./DEV_LOG.md)** - Complete development context and testing checklist
-
----
-
-## 🔄 Recent Changes
-
-**February 27, 2026 - Route Lookup Implementation**
-- ✅ Created `routeController.js` with public APIs
-- ✅ Added route-lookup page and endpoints to `webRoutes.js`
-- ✅ Fixed model safety issue with mongoose wrapper pattern
-- ✅ Verified `route-lookup.ejs` integration with Leaflet.js and OSRM
-- ✅ Created comprehensive development log for continuity
-
----
-
-## 💡 Next Priority Tasks
-
-1. **Seed Sample Data** - Populate database with test routes and stops
-2. **Comprehensive Testing** - Validate all features from DEV_LOG checklist
-3. **Performance Optimization** - Add caching and query indexes
-4. **Mobile App Integration** - Ensure API compatibility with mobile clients
-5. **Admin Features** - Build route management UI in admin panel
-
----
-
-**Last Updated**: February 27, 2026 (✅ Route Lookup Complete)  
-**Maintained By**: Full-Stack Development Team  
-**Status**: Ready for Testing & Database Population
+## Registration URLs
+- Step 1: `http://localhost:3000/register-step1`
+- Step 2: `http://localhost:3000/register-step2`
+- Step 3: `http://localhost:3000/verify-otp?type=registration`
+- Step 4: `http://localhost:3000/create-password`

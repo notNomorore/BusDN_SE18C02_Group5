@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const { User } = require('../models/models');
+const { applyPriorityExpiryForUser } = require('../utils/priorityUtils');
 require('dotenv').config();
 // Configure Nodemailer (Placeholder as requested, but functional if credentials provided)
 // For real testing, use Ethereal or a real service.
@@ -57,6 +58,7 @@ exports.register = async (req, res) => {
             password: hashedPassword,
             otp_code: otp,
             otp_expires: otpExpires,
+            isFirstLogin: false,
             isVerified: false
         });
 
@@ -99,8 +101,14 @@ exports.verifyOTP = async (req, res) => {
 
 exports.login = async (req, res) => {
     try {
-        const { email, password } = req.body;
-        const user = await User.findOne({ email });
+        const identifier = (req.body.email || req.body.phone || '').trim();
+        const { password } = req.body;
+        const user = await User.findOne({
+            $or: [
+                { email: identifier.toLowerCase() },
+                { phone: identifier }
+            ]
+        });
 
         if (!user) {
             return res.status(400).json({ message: 'Sai email hoặc mật khẩu' });
@@ -114,6 +122,11 @@ exports.login = async (req, res) => {
         if (!user.isVerified) {
             return res.status(400).json({ message: 'Tài khoản chưa được xác thực' });
         }
+        if (user.isLocked || user.status === 'LOCKED') {
+            return res.status(400).json({ message: 'Tai khoan da bi khoa' });
+        }
+
+        await applyPriorityExpiryForUser(user._id);
 
         const token = jwt.sign(
             { userId: user._id, role: user.role },
@@ -121,20 +134,22 @@ exports.login = async (req, res) => {
             { expiresIn: '7d' }
         );
 
-        res.json({
+        return res.json({
             message: 'Login successful',
             token,
             user: {
                 id: user._id,
                 fullName: user.fullName,
                 email: user.email,
+                phone: user.phone,
                 role: user.role,
-                avatar: user.avatar
+                avatar: user.avatar,
+                isFirstLogin: !!user.isFirstLogin
             }
         });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ message: 'Lỗi Server' });
+        return res.status(500).json({ message: 'Lỗi Server' });
     }
 };
 
@@ -200,6 +215,7 @@ exports.changePassword = async (req, res) => {
 
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(newPassword, salt);
+        user.isFirstLogin = false;
         await user.save();
 
         res.json({ message: 'Password changed successfully' });

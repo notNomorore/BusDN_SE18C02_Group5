@@ -1,38 +1,80 @@
-const nodemailer = require('nodemailer');
 const path = require('path');
 const fs = require('fs');
-const { User, PriorityProfile } = require('../models/models');
-require('dotenv').config();
-// --- NODEMAILER CONFIGURATION ---
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: process.env.EMAIL_USER ,
-        pass: process.env.EMAIL_PASS
-    }
-});
+const { User, PriorityProfile, PriorityHistory } = require('../models/models');
+const { sendEmail } = require('../config/helpers');
+const {
+    getMinPriorityExpiryDate,
+    isExpiryDateValid,
+    emitPendingPriorityCount
+} = require('../utils/priorityUtils');
 
-// --- EMAIL HELPER ---
-const sendEmail = async (to, subject, htmlContent) => {
-    try {
-        await transporter.sendMail({
-            from: '"BusDN Admin"',
-            to: to,
-            subject: subject,
-            html: htmlContent
-        });
-        console.log(`✅ Email sent to ${to}`);
-    } catch (error) {
-        console.error('❌ Error sending email:', error);
-    }
+const getApprovalEmailHtml = (fullName, expiryDate) => `
+<div style="font-family: Arial, sans-serif; background:#f4f7fb; padding:20px;">
+  <div style="max-width:620px; margin:0 auto; background:#fff; border-radius:10px; padding:24px;">
+    <h2 style="margin-top:0; color:#123d7a;">BusDN - Priority Approved</h2>
+    <p>Xin chao <strong>${fullName}</strong>,</p>
+    <p>Ho so uu tien cua ban da duoc phe duyet.</p>
+    <p><strong>Uu dai:</strong> Giam gia co dinh 20% cho luong mua ve/ve thang khi trang thai uu tien con hieu luc.</p>
+    <p><strong>Ngay het han:</strong> ${new Date(expiryDate).toLocaleDateString('vi-VN')}</p>
+    <p>Ban co the dang nhap de su dung uu dai ngay bay gio.</p>
+  </div>
+</div>
+`;
+
+const getRejectedEmailHtml = (fullName, reason) => `
+<div style="font-family: Arial, sans-serif; background:#f4f7fb; padding:20px;">
+  <div style="max-width:620px; margin:0 auto; background:#fff; border-radius:10px; padding:24px;">
+    <h2 style="margin-top:0; color:#7a1b12;">BusDN - Priority Rejected</h2>
+    <p>Xin chao <strong>${fullName}</strong>,</p>
+    <p>Ho so uu tien cua ban chua du dieu kien duoc phe duyet.</p>
+    <p><strong>Ly do:</strong> ${reason}</p>
+    <p>Ban co the cap nhat ho so va nop lai trong he thong.</p>
+  </div>
+</div>
+`;
+
+const syncUserPriorityPending = async (userId, profile) => {
+    await User.findByIdAndUpdate(userId, {
+        isPriorityGroup: false,
+        priorityStatus: 'PENDING',
+        priorityProfile: {
+            cardImageFront: profile.idCardImageFront,
+            cardImageBack: profile.idCardImageBack,
+            cardNumber: profile.idNumber,
+            status: 'PENDING',
+            expiryDate: null
+        }
+    });
 };
 
-// --- USER CONTROLLERS ---
+const syncUserPriorityApproved = async (userId, profile) => {
+    await User.findByIdAndUpdate(userId, {
+        isPriorityGroup: true,
+        priorityStatus: 'APPROVED',
+        priorityProfile: {
+            cardImageFront: profile.idCardImageFront,
+            cardImageBack: profile.idCardImageBack,
+            cardNumber: profile.idNumber,
+            status: 'APPROVED',
+            expiryDate: profile.expiryDate
+        }
+    });
+};
 
-/**
- * GET /priority/register - Show registration form
- * Check existing profile status and render appropriate view
- */
+const syncUserPriorityRejected = async (userId, profile) => {
+    await User.findByIdAndUpdate(userId, {
+        isPriorityGroup: false,
+        priorityStatus: 'REJECTED',
+        priorityProfile: {
+            cardImageFront: profile.idCardImageFront,
+            cardImageBack: profile.idCardImageBack,
+            cardNumber: profile.idNumber,
+            status: 'REJECTED',
+            expiryDate: null
+        }
+    });
+};
+
 exports.getRegisterForm = async (req, res) => {
     try {
         if (!req.session.userId) {
@@ -42,41 +84,29 @@ exports.getRegisterForm = async (req, res) => {
         const user = await User.findById(req.session.userId);
         if (!user) return res.status(404).send('User not found');
 
-        // Check if priority profile exists
         const profile = await PriorityProfile.findOne({ userId: req.session.userId });
-
-        // If profile exists and is approved, redirect to profile
-        if (profile && profile.status === 'approved') {
+        if (profile?.status === 'approved') {
             return res.redirect('/priority/view');
         }
-
-        // If profile exists and is pending, show status page
-        if (profile && profile.status === 'pending') {
+        if (profile?.status === 'pending') {
             return res.redirect('/priority/status');
         }
-
-        // If profile exists and is rejected, show form with rejection reason
-        if (profile && profile.status === 'rejected') {
+        if (profile?.status === 'rejected') {
             return res.render('priority-register', {
                 user,
-                error: `Your previous application was rejected. Reason: ${profile.rejectionReason}`,
+                error: `Ho so truoc do da bi tu choi. Ly do: ${profile.rejectionReason}`,
                 success: null,
                 oldProfile: profile
             });
         }
 
-        // Otherwise, show the registration form
-        res.render('priority-register', { user, error: null, success: null, oldProfile: null });
+        return res.render('priority-register', { user, error: null, success: null, oldProfile: null });
     } catch (error) {
         console.error('Error loading register form:', error);
-        res.status(500).send('Error loading page');
+        return res.status(500).send('Error loading page');
     }
 };
 
-/**
- * POST /priority/register - Submit priority profile registration
- * Expects: category, idNumber, files (idCardFront, idCardBack, proofImage)
- */
 exports.submitRegistration = async (req, res) => {
     try {
         if (!req.session.userId) {
@@ -86,11 +116,10 @@ exports.submitRegistration = async (req, res) => {
         const { category, idNumber } = req.body;
         const user = await User.findById(req.session.userId);
 
-        // Validation
         if (!category || !idNumber) {
             return res.render('priority-register', {
                 user,
-                error: 'Please fill in all required fields',
+                error: 'Vui long dien day du thong tin bat buoc.',
                 success: null,
                 oldProfile: null
             });
@@ -99,133 +128,115 @@ exports.submitRegistration = async (req, res) => {
         if (!req.files || !req.files.idCardFront || !req.files.idCardBack || !req.files.proofImage) {
             return res.render('priority-register', {
                 user,
-                error: 'Please upload all three required images',
+                error: 'Vui long tai len day du 3 anh giay to.',
                 success: null,
                 oldProfile: null
             });
         }
 
-        // Check if profile already exists
         let profile = await PriorityProfile.findOne({ userId: req.session.userId });
-
-        if (profile && profile.status === 'pending') {
+        if (profile?.status === 'pending') {
             return res.render('priority-register', {
                 user,
-                error: 'Your application is still being reviewed. Please wait.',
+                error: 'Ho so dang cho duyet. Vui long doi ket qua.',
                 success: null,
                 oldProfile: profile
             });
         }
 
-        // If existing profile, delete old files
         if (profile) {
             deleteOldFiles(profile);
         }
 
-        // Create or update profile
         const profileData = {
             userId: req.session.userId,
             category,
             idNumber,
-            idCardImageFront: '/uploads/priority/' + req.files.idCardFront[0].filename,
-            idCardImageBack: '/uploads/priority/' + req.files.idCardBack[0].filename,
-            proofImage: '/uploads/priority/' + req.files.proofImage[0].filename,
+            idCardImageFront: `/uploads/priority/${req.files.idCardFront[0].filename}`,
+            idCardImageBack: `/uploads/priority/${req.files.idCardBack[0].filename}`,
+            proofImage: `/uploads/priority/${req.files.proofImage[0].filename}`,
             status: 'pending',
             rejectionReason: null,
             expiryDate: null
         };
 
         if (profile) {
-            // Update existing
             profile = await PriorityProfile.findByIdAndUpdate(profile._id, profileData, { new: true });
         } else {
-            // Create new
-            profile = new PriorityProfile(profileData);
-            await profile.save();
+            profile = await PriorityProfile.create(profileData);
         }
 
-        // Send confirmation email to user
-        await sendNotificationEmail(user, 'submitted');
+        await syncUserPriorityPending(req.session.userId, profile);
+        await emitPendingPriorityCount();
 
-        res.render('priority-status', {
+        if (user?.email) {
+            await sendEmail(
+                user.email,
+                'BusDN - Ho so uu tien da duoc tiep nhan',
+                `<p>Xin chao ${user.fullName}, ho so uu tien cua ban da duoc tiep nhan va dang cho duyet.</p>`
+            );
+        }
+
+        return res.render('priority-status', {
             user,
             profile,
-            message: 'Your priority profile has been submitted successfully! Our admin team will review it shortly.'
+            message: 'Ho so uu tien da duoc gui. Admin se xu ly som.'
         });
     } catch (error) {
         console.error('Error submitting registration:', error);
-
         if (req.files) {
             deleteUploadedFiles(req.files);
         }
 
         const user = await User.findById(req.session.userId);
-        res.render('priority-register', {
+        return res.render('priority-register', {
             user,
-            error: 'Error submitting profile: ' + error.message,
+            error: 'Khong the gui ho so: ' + error.message,
             success: null,
             oldProfile: null
         });
     }
 };
 
-/**
- * GET /priority/status - Show status of priority profile
- */
 exports.getStatus = async (req, res) => {
     try {
         if (!req.session.userId) {
             return res.redirect('/login');
         }
-
         const user = await User.findById(req.session.userId);
         const profile = await PriorityProfile.findOne({ userId: req.session.userId });
-
         if (!profile) {
             return res.redirect('/priority/register');
         }
-
-        res.render('priority-status', { user, profile, message: null });
+        return res.render('priority-status', { user, profile, message: null });
     } catch (error) {
         console.error('Error loading status:', error);
-        res.status(500).send('Error loading page');
+        return res.status(500).send('Error loading page');
     }
 };
 
-/**
- * GET /priority/view - View approved priority profile
- */
 exports.viewProfile = async (req, res) => {
     try {
         if (!req.session.userId) {
             return res.redirect('/login');
         }
-
         const user = await User.findById(req.session.userId);
         const profile = await PriorityProfile.findOne({ userId: req.session.userId });
-
         if (!profile || profile.status !== 'approved') {
             return res.redirect('/priority/register');
         }
-
-        res.render('priority-view', { user, profile });
+        return res.render('priority-view', { user, profile });
     } catch (error) {
         console.error('Error loading profile:', error);
-        res.status(500).send('Error loading page');
+        return res.status(500).send('Error loading page');
     }
 };
 
-// --- ADMIN CONTROLLERS ---
-
-/**
- * GET /admin/priority-profiles - List all priority profiles
- */
 exports.listProfiles = async (req, res) => {
     try {
         const { status = 'pending' } = req.query;
-
-        let filter = {};
-        if (status && ['pending', 'approved', 'rejected'].includes(status)) {
+        const filter = {};
+        if (['pending', 'approved', 'rejected'].includes(status)) {
             filter.status = status;
         }
 
@@ -234,88 +245,87 @@ exports.listProfiles = async (req, res) => {
             .sort({ createdAt: -1 });
 
         const { renderAdmin } = require('../middleware/renderAdmin');
-        await renderAdmin(req, res, 'admin/priority-profiles', 'Quản lý Hồ sơ Ưu tiên', {
+        return renderAdmin(req, res, 'admin/priority-profiles', 'Quan ly Ho so Uu tien', {
             profiles,
             currentStatus: status,
             path: 'priority-profiles'
         });
     } catch (error) {
         console.error('Error listing profiles:', error);
-        res.status(500).send('Error loading profiles');
+        return res.status(500).send('Error loading profiles');
     }
 };
 
-/**
- * GET /admin/priority-profiles/:profileId - View profile details
- */
 exports.viewProfileDetail = async (req, res) => {
     try {
         const { profileId } = req.params;
         const profile = await PriorityProfile.findById(profileId).populate('userId');
-
         if (!profile) {
             return res.status(404).send('Profile not found');
         }
 
+        const minExpiryDate = getMinPriorityExpiryDate(new Date());
         const { renderAdmin } = require('../middleware/renderAdmin');
-        await renderAdmin(req, res, 'admin/priority-detail', 'Chi tiết hồ sơ ưu tiên', {
+        return renderAdmin(req, res, 'admin/priority-detail', 'Chi tiet Ho so Uu tien', {
             profile,
+            minExpiryDate: minExpiryDate.toISOString().split('T')[0],
             path: 'priority-profiles'
         });
     } catch (error) {
         console.error('Error loading profile detail:', error);
-        res.status(500).send('Error loading profile');
+        return res.status(500).send('Error loading profile');
     }
 };
 
-/**
- * POST /admin/priority-profiles/:profileId/approve - Approve profile
- * Expects: expiryDate (optional, defaults to 2 years from now)
- */
 exports.approveProfile = async (req, res) => {
     try {
         const { profileId } = req.params;
-        let { expiryDate } = req.body;
+        const approvalDate = new Date();
+        const minExpiryDate = getMinPriorityExpiryDate(approvalDate);
+
+        let parsedExpiry = req.body?.expiryDate ? new Date(req.body.expiryDate) : minExpiryDate;
+        if (Number.isNaN(parsedExpiry.getTime())) {
+            return res.status(400).json({ error: 'Ngay het han khong hop le.' });
+        }
+        parsedExpiry.setHours(0, 0, 0, 0);
+
+        if (!isExpiryDateValid(parsedExpiry, approvalDate)) {
+            return res.status(400).json({
+                error: `Ngay het han phai tu ${minExpiryDate.toLocaleDateString('vi-VN')} tro di.`
+            });
+        }
 
         const profile = await PriorityProfile.findById(profileId).populate('userId');
         if (!profile) {
             return res.status(404).json({ error: 'Profile not found' });
         }
 
-        // If no expiry date provided, set to 2 years from now
-        if (!expiryDate) {
-            const tomorrow = new Date();
-            tomorrow.setFullYear(tomorrow.getFullYear() + 2);
-            expiryDate = tomorrow;
-        } else {
-            expiryDate = new Date(expiryDate);
+        profile.status = 'approved';
+        profile.expiryDate = parsedExpiry;
+        profile.rejectionReason = null;
+        await profile.save();
+        await syncUserPriorityApproved(profile.userId._id, profile);
+
+        if (profile.userId?.email) {
+            await sendEmail(
+                profile.userId.email,
+                'BusDN - Ho so uu tien da duoc phe duyet',
+                getApprovalEmailHtml(profile.userId.fullName, parsedExpiry)
+            );
         }
 
-        // Update profile
-        profile.status = 'approved';
-        profile.expiryDate = expiryDate;
-        await profile.save();
-
-        // Send approval email to user
-        await sendNotificationEmail(profile.userId, 'approved', expiryDate);
-
-        console.log(`✅ Profile ${profileId} approved - Expiry: ${expiryDate}`);
-        res.json({ success: true, message: 'Profile approved successfully' });
+        await emitPendingPriorityCount();
+        return res.json({ success: true, message: 'Profile approved successfully' });
     } catch (error) {
         console.error('Error approving profile:', error);
-        res.status(500).json({ error: 'Error approving profile' });
+        return res.status(500).json({ error: 'Error approving profile' });
     }
 };
 
-/**
- * POST /admin/priority-profiles/:profileId/reject - Reject profile
- * Expects: rejectionReason
- */
 exports.rejectProfile = async (req, res) => {
     try {
         const { profileId } = req.params;
-        const { rejectionReason } = req.body;
-
+        const rejectionReason = (req.body?.rejectionReason || '').trim();
         if (!rejectionReason) {
             return res.status(400).json({ error: 'Rejection reason is required' });
         }
@@ -325,116 +335,37 @@ exports.rejectProfile = async (req, res) => {
             return res.status(404).json({ error: 'Profile not found' });
         }
 
-        // Update profile
         profile.status = 'rejected';
         profile.rejectionReason = rejectionReason;
+        profile.expiryDate = null;
         await profile.save();
+        await syncUserPriorityRejected(profile.userId._id, profile);
 
-        // Send rejection email to user
-        await sendNotificationEmail(profile.userId, 'rejected', null, rejectionReason);
+        await PriorityHistory.create({
+            userId: profile.userId._id,
+            profileId: profile._id,
+            action: 'REJECTED',
+            rejectedBy: req.session.userId,
+            reason: rejectionReason,
+            timestamp: new Date()
+        });
 
-        console.log(`✅ Profile ${profileId} rejected - Reason: ${rejectionReason}`);
-        res.json({ success: true, message: 'Profile rejected successfully' });
+        if (profile.userId?.email) {
+            await sendEmail(
+                profile.userId.email,
+                'BusDN - Ho so uu tien bi tu choi',
+                getRejectedEmailHtml(profile.userId.fullName, rejectionReason)
+            );
+        }
+
+        await emitPendingPriorityCount();
+        return res.json({ success: true, message: 'Profile rejected successfully' });
     } catch (error) {
         console.error('Error rejecting profile:', error);
-        res.status(500).json({ error: 'Error rejecting profile' });
+        return res.status(500).json({ error: 'Error rejecting profile' });
     }
 };
 
-// --- HELPER FUNCTIONS ---
-
-/**
- * Send email notifications for profile status changes
- */
-const sendNotificationEmail = async (user, action, expiryDate = null, rejectionReason = null) => {
-    let subject, htmlContent;
-
-    if (action === 'submitted') {
-        subject = 'BusDN - Priority Profile Submitted';
-        htmlContent = getEmailTemplate('submitted', user.fullName);
-    } else if (action === 'approved') {
-        subject = 'BusDN - Your Priority Profile Approved ✅';
-        htmlContent = getEmailTemplate('approved', user.fullName, expiryDate);
-    } else if (action === 'rejected') {
-        subject = 'BusDN - Priority Profile Update ℹ️';
-        htmlContent = getEmailTemplate('rejected', user.fullName, null, rejectionReason);
-    }
-
-    await sendEmail(user.email, subject, htmlContent);
-};
-
-/**
- * Generate HTML email template
- */
-const getEmailTemplate = (type, fullName, expiryDate = null, rejectionReason = null) => {
-    const currentYear = new Date().getFullYear();
-
-    let content = '';
-
-    if (type === 'submitted') {
-        content = `
-            <p>Dear ${fullName},</p>
-            <p>Thank you for submitting your priority profile application to BusDN.</p>
-            <p>We have received your documents and our admin team will review them shortly.</p>
-            <p><strong>You will receive another email once your application has been reviewed.</strong></p>
-        `;
-    } else if (type === 'approved') {
-        const expiryStr = new Date(expiryDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-        content = `
-            <p>Dear ${fullName},</p>
-            <p><strong style="color: #28a745; font-size: 18px;">🎉 Congratulations!</strong></p>
-            <p>Your priority profile has been <strong>approved</strong> and is now <strong>active</strong>.</p>
-            <p>You are now eligible for discounted fares on BusDN services.</p>
-            <div style="background-color: #e8f5e9; border-left: 4px solid #28a745; padding: 15px; margin: 20px 0;">
-                <p style="margin: 5px 0;"><strong>Expiry Date:</strong> <span style="color: #28a745;">${expiryStr}</span></p>
-                <p style="margin: 5px 0; font-size: 12px;">Your priority status will expire on the date shown above.</p>
-            </div>
-            <p><a href="http://localhost:3000/priority/view" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">View My Priority Profile</a></p>
-        `;
-    } else if (type === 'rejected') {
-        content = `
-            <p>Dear ${fullName},</p>
-            <p>Thank you for submitting your priority profile application to BusDN.</p>
-            <p>Unfortunately, your application has been <strong>declined</strong>. Here's why:</p>
-            <div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0;">
-                <p>${rejectionReason}</p>
-            </div>
-            <p>You can <strong>resubmit your application</strong> with corrected documents.</p>
-            <p><a href="http://localhost:3000/priority/register" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Resubmit Application</a></p>
-        `;
-    }
-
-    return `
-        <html>
-            <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px;">
-                <div style="max-width: 600px; margin: 0 auto; background-color: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-                    <!-- Header -->
-                    <div style="border-bottom: 3px solid #003366; padding-bottom: 20px; margin-bottom: 30px;">
-                        <h1 style="color: #003366; margin: 0; font-size: 24px;">
-                            <i style="color: #ffc107;">🚌</i> BusDN
-                        </h1>
-                    </div>
-
-                    <!-- Main Content -->
-                    <div style="color: #333; line-height: 1.6; font-size: 14px;">
-                        ${content}
-                    </div>
-
-                    <!-- Footer -->
-                    <hr style="border: none; border-top: 1px solid #ddd; margin: 40px 0;">
-                    <p style="color: #999; font-size: 12px; text-align: center; margin: 0;">
-                        © ${currentYear} BusDN - Bus Management System<br>
-                        If you have any questions, please contact our support team.
-                    </p>
-                </div>
-            </body>
-        </html>
-    `;
-};
-
-/**
- * Delete old uploaded files
- */
 const deleteOldFiles = (profile) => {
     const filePaths = [
         profile.idCardImageFront,
@@ -442,31 +373,22 @@ const deleteOldFiles = (profile) => {
         profile.proofImage
     ];
 
-    filePaths.forEach(filePath => {
-        if (filePath) {
-            const fullPath = path.join(__dirname, '../public', filePath);
-            if (fs.existsSync(fullPath)) {
-                fs.unlinkSync(fullPath);
-                console.log(`✅ Deleted old file: ${fullPath}`);
-            }
+    filePaths.forEach((filePath) => {
+        if (!filePath) return;
+        const fullPath = path.join(__dirname, '../public', filePath);
+        if (fs.existsSync(fullPath)) {
+            fs.unlinkSync(fullPath);
         }
     });
 };
 
-/**
- * Delete uploaded files in case of error
- */
 const deleteUploadedFiles = (files) => {
-    if (files.idCardFront) {
-        const fullPath = path.join(__dirname, '../public/uploads/priority', files.idCardFront[0].filename);
-        if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
-    }
-    if (files.idCardBack) {
-        const fullPath = path.join(__dirname, '../public/uploads/priority', files.idCardBack[0].filename);
-        if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
-    }
-    if (files.proofImage) {
-        const fullPath = path.join(__dirname, '../public/uploads/priority', files.proofImage[0].filename);
-        if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
-    }
+    const map = ['idCardFront', 'idCardBack', 'proofImage'];
+    map.forEach((key) => {
+        if (!files[key]?.[0]?.filename) return;
+        const fullPath = path.join(__dirname, '../public/uploads/priority', files[key][0].filename);
+        if (fs.existsSync(fullPath)) {
+            fs.unlinkSync(fullPath);
+        }
+    });
 };

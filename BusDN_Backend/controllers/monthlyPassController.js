@@ -1,4 +1,5 @@
 const { User, Route, MonthlyPass, WalletTransaction } = require("../models/models");
+const { PRIORITY_DISCOUNT_RATE, applyPriorityExpiryForUser, applyPriorityDiscount } = require("../utils/priorityUtils");
 
 function isPassenger(req) {
     return req.session?.userId && req.session?.role === "PASSENGER";
@@ -63,6 +64,7 @@ exports.getMonthlyPassPage = async (req, res) => {
 
         const user = await User.findById(req.session.userId).lean();
         if (!user) return res.redirect("/login");
+        const discountRate = user.isPriorityGroup ? PRIORITY_DISCOUNT_RATE : 0;
 
         const routes = await Route.find({ status: "ACTIVE" })
             .sort({ routeNumber: 1, name: 1 })
@@ -107,7 +109,8 @@ exports.getMonthlyPassPage = async (req, res) => {
             selectedRouteId: req.query.routeId || "",
             selectedMonth,
             selectedYear,
-            defaultPassMonth: getDefaultMonthValue()
+            defaultPassMonth: getDefaultMonthValue(),
+            priorityDiscountRate: discountRate
         });
     } catch (err) {
         console.error("❌ getMonthlyPassPage:", err);
@@ -123,6 +126,8 @@ exports.purchaseMonthlyPass = async (req, res) => {
         console.log("🧾 purchaseMonthlyPass body =", req.body);
 
         const userId = req.session.userId;
+        await applyPriorityExpiryForUser(userId);
+        const currentUser = await User.findById(userId).select("walletBalance isPriorityGroup");
         const routeId = String(req.body.routeId || "").trim();
 
         let month = parsePositiveInt(req.body.month);
@@ -189,12 +194,16 @@ if (existingPass) {
     );
 }
 
-        const price = Number(route.monthlyPassPrice || 0);
-        if (!Number.isFinite(price) || price <= 0) {
+        const originalPrice = Number(route.monthlyPassPrice || 0);
+        if (!Number.isFinite(originalPrice) || originalPrice <= 0) {
             return res.redirect(
                 pageRedirectWithMsg("error", "Giá vé tháng tuyến này chưa được cấu hình.", backQuery)
             );
         }
+        const isPriorityGroup = !!currentUser?.isPriorityGroup;
+        const discountedPrice = applyPriorityDiscount(originalPrice, { isPriorityGroup });
+        const price = Math.round(Math.max(0, discountedPrice));
+        const discountAmount = Math.max(0, originalPrice - price);
 
         // Trừ ví atomically
         const userAfterDeduct = await User.findOneAndUpdate(
@@ -227,6 +236,8 @@ if (existingPass) {
                 validFrom,
                 validTo,
                 pricePaid: price,
+                originalPrice,
+                discountAmount,
                 paidBy: "WALLET",
                 status: "ACTIVE"
             });
@@ -250,9 +261,11 @@ if (createErr?.code === 11000) {
         await WalletTransaction.create({
             userId,
             amount: price,
+            originalAmount: originalPrice,
+            discountAmount,
             direction: "OUT",
             txnType: "MONTHLY_PASS",
-            note: `Mua vé tháng tuyến ${route.routeNumber || ""} - ${route.name || ""} (${pad2(month)}/${year})`,
+            note: `Mua vé tháng tuyến ${route.routeNumber || ""} - ${route.name || ""} (${pad2(month)}/${year})${isPriorityGroup ? " - Ưu đãi 20%" : ""}`,
             method: "WALLET",
             status: "SUCCESS",
             relatedMonthlyPassId: createdPass._id,
@@ -261,11 +274,11 @@ if (createErr?.code === 11000) {
 
         return res.redirect(
             pageRedirectWithMsg(
-                "success",
-                `Mua vé tháng thành công cho tuyến ${route.routeNumber} - ${route.name} (${pad2(month)}/${year}).`,
-                { routeId, month, year }
-            )
-        );
+                    "success",
+                    `Mua vé tháng thành công cho tuyến ${route.routeNumber} - ${route.name} (${pad2(month)}/${year})${isPriorityGroup ? " với ưu đãi 20%." : "."}`,
+                    { routeId, month, year }
+                )
+            );
     } catch (err) {
         console.error("❌ purchaseMonthlyPass:", err);
         return res.redirect(

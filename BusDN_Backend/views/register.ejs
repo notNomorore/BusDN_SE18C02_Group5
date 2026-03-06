@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đăng ký - BusDN</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        body,
+        html {
+            height: 90%;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+        }
+
+        .bg-image {
+            background-image: url('/images/bus-bg.jpg');
+            background-size: cover;
+            background-position: center;
+            position: relative;
+        }
+
+        .bg-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            background: linear-gradient(to bottom, rgba(0, 51, 102, 0.4), rgba(0, 0, 0, 0.9));
+        }
+
+        .bg-image::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            right: 0;
+            width: 40%;
+            background: linear-gradient(to right, transparent, #f8f9fa);
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        .slogan-container {
+            position: absolute;
+            bottom: 10%;
+            left: 0;
+            padding: 3rem;
+            color: white;
+            z-index: 3;
+            text-shadow: 2px 2px 10px rgba(0, 0, 0, 0.9);
+        }
+
+        .slogan-title {
+            font-size: 3.5rem;
+            font-weight: 800;
+            margin-bottom: 0.5rem;
+        }
+
+        .slogan-subtitle {
+            font-size: 1.3rem;
+            font-weight: 400;
+            opacity: 0.9;
+        }
+
+        .login-section {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #f8f9fa;
+            position: relative;
+            z-index: 2;
+        }
+
+        .login-card {
+            width: 100%;
+            max-width: 450px;
+            background-color: #003366;
+            color: white;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+        }
+
+        .app-logo {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            color: #ffcc00;
+        }
+
+        .form-control {
+            height: 50px;
+            font-size: 16px;
+            border-radius: 8px;
+            border: none;
+        }
+
+        .form-control:focus {
+            box-shadow: 0 0 0 0.2rem rgba(40, 167, 69, 0.25);
+            border-color: #28a745;
+        }
+
+        .small-input {
+            height: 45px;
+            font-size: 14px;
+        }
+
+        .btn-register {
+            background-color: #28a745;
+            border: none;
+            height: 50px;
+            font-size: 18px;
+            font-weight: bold;
+            width: 100%;
+            border-radius: 8px;
+            color: white;
+            margin-top: 10px;
+            transition: all 0.3s;
+        }
+
+        .btn-register:hover {
+            background-color: #218838;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .divider {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            margin: 20px 0;
+        }
+
+        .login-link {
+            color: #adb5bd;
+            text-decoration: none;
+            font-size: 0.95rem;
+        }
+
+        .login-link:hover {
+            color: white;
+            text-decoration: underline;
+        }
+
+        .password-requirements {
+            font-size: 0.85rem;
+            color: #d4d4d8;
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+            border-left: 3px solid #ffcc00;
+        }
+
+        .requirement {
+            margin: 5px 0;
+        }
+
+        .requirement.valid {
+            color: #28a745;
+        }
+
+        .requirement.invalid {
+            color: #dc3545;
+        }
+
+        @media (max-width: 768px) {
+            .slogan-container {
+                display: none;
+            }
+
+            .slogan-title {
+                font-size: 2.5rem;
+            }
+
+            .login-card {
+                padding: 30px;
+                max-width: 100%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container-fluid h-100">
+        <div class="row h-100">
+
+            <div class="col-lg-7 p-0 d-none d-lg-block bg-image">
+                <div class="bg-overlay"></div>
+
+                <div class="slogan-container">
+                    <h1 class="slogan-title">BusDN Management</h1>
+                    <p class="slogan-subtitle">Hệ thống quản lý vận tải hành khách công cộng thông minh.</p>
+                </div>
+            </div>
+
+            <div class="col-lg-5 login-section">
+
+                <div class="login-card">
+                    <div class="text-center mb-4">
+                        <i class="fa-solid fa-bus-simple app-logo"></i>
+                        <h2 class="fw-bold">Đăng Ký</h2>
+                        <p class="text-white-50">Tạo tài khoản mới để sử dụng dịch vụ</p>
+                    </div>
+
+                    <% if (error) { %>
+                        <div class="alert alert-danger p-2 text-center text-danger bg-white mb-3">
+                            <i class="fa-solid fa-circle-exclamation me-2"></i><%= error %>
+                        </div>
+                    <% } %>
+                    <% if (success) { %>
+                        <div class="alert alert-success p-2 text-center text-success bg-white mb-3">
+                            <i class="fa-solid fa-check-circle me-2"></i><%= success %>
+                        </div>
+                    <% } %>
+
+                    <form action="/register" method="POST" id="registerForm">
+                        <div class="mb-2">
+                            <label class="form-label">Họ tên</label>
+                            <input type="text" name="fullName" class="form-control" placeholder="Nhập họ tên của bạn" required>
+                        </div>
+
+                        <div class="mb-2">
+                            <label class="form-label">Email</label>
+                            <input type="email" name="email" class="form-control" placeholder="example@busdn.com" required>
+                        </div>
+
+                        <div class="mb-2">
+                            <label class="form-label">Mật khẩu</label>
+                            <input type="password" id="password" name="password" class="form-control" placeholder="••••••••" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Xác nhận mật khẩu</label>
+                            <input type="password" id="confirmPassword" name="confirmPassword" class="form-control" placeholder="••••••••" required>
+                        </div>
+
+                        <div class="password-requirements" id="requirements">
+                            <strong>Yêu cầu mật khẩu:</strong>
+                            <div class="requirement invalid" id="req-length">
+                                <i class="fa-solid fa-circle me-1" style="font-size: 0.5rem;"></i> Ít nhất 8 ký tự
+                            </div>
+                            <div class="requirement invalid" id="req-upper">
+                                <i class="fa-solid fa-circle me-1" style="font-size: 0.5rem;"></i> Chứa chữ cái hoa (A-Z)
+                            </div>
+                            <div class="requirement invalid" id="req-lower">
+                                <i class="fa-solid fa-circle me-1" style="font-size: 0.5rem;"></i> Chứa chữ cái thường (a-z)
+                            </div>
+                            <div class="requirement invalid" id="req-number">
+                                <i class="fa-solid fa-circle me-1" style="font-size: 0.5rem;"></i> Chứa chữ số (0-9)
+                            </div>
+                            <div class="requirement invalid" id="req-special">
+                                <i class="fa-solid fa-circle me-1" style="font-size: 0.5rem;"></i> Chứa ký tự đặc biệt (@$!%*?&)
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-register" id="submitBtn" disabled>ĐĂNG KÝ</button>
+                    </form>
+
+                    <div class="divider"></div>
+
+                    <p class="text-center text-white-50 small mb-0">
+                        Đã có tài khoản ?
+                        <a href="/login" class="login-link" style="font-weight: bold;">Đăng nhập tại đây</a>
+                    </p>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const passwordInput = document.getElementById('password');
+        const confirmPasswordInput = document.getElementById('confirmPassword');
+        const submitBtn = document.getElementById('submitBtn');
+
+        const requirements = {
+            length: document.getElementById('req-length'),
+            upper: document.getElementById('req-upper'),
+            lower: document.getElementById('req-lower'),
+            number: document.getElementById('req-number'),
+            special: document.getElementById('req-special')
+        };
+
+        function validatePassword() {
+            const password = passwordInput.value;
+            const confirmPassword = confirmPasswordInput.value;
+
+            const checks = {
+                length: password.length >= 8,
+                upper: /[A-Z]/.test(password),
+                lower: /[a-z]/.test(password),
+                number: /\d/.test(password),
+                special: /[@$!%*?&]/.test(password)
+            };
+
+            Object.keys(checks).forEach(key => {
+                if (checks[key]) {
+                    requirements[key].classList.remove('invalid');
+                    requirements[key].classList.add('valid');
+                } else {
+                    requirements[key].classList.remove('valid');
+                    requirements[key].classList.add('invalid');
+                }
+            });
+
+            const allValid = Object.values(checks).every(v => v);
+            const passwordMatch = password && confirmPassword && password === confirmPassword;
+
+            submitBtn.disabled = !(allValid && passwordMatch);
+        }
+
+        passwordInput.addEventListener('input', validatePassword);
+        confirmPasswordInput.addEventListener('input', validatePassword);
+    </script>
+
+</body>
+
+</html>

@@ -1,165 +1,201 @@
-<div class="d-flex justify-content-between align-items-center pb-2 mb-3 border-bottom">
-    <h1 class="h2"><i class="fas fa-users-cog me-2 text-primary"></i> Quản lý Nhân sự</h1>
-    <div class="d-flex gap-2">
+<style>
+    .users-shell {
+        display: grid;
+        gap: 16px;
+    }
+
+    .users-hero,
+    .users-card {
+        background: #fff;
+        border-radius: 14px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+        border: 1px solid #eef1f6;
+    }
+
+    .users-hero {
+        padding: 18px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .users-card {
+        padding: 16px;
+    }
+
+    .users-grid {
+        display: grid;
+        gap: 14px;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    }
+
+    .users-avatar {
+        width: 42px;
+        height: 42px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 2px solid #fff;
+        box-shadow: 0 2px 7px rgba(0, 0, 0, 0.15);
+    }
+</style>
+
+<div class="users-shell">
+    <section class="users-hero">
+        <div>
+            <h1 class="h4 mb-1"><i class="fas fa-users-cog me-2 text-primary"></i>User Management</h1>
+            <div class="text-muted small">Search by Name/Email/Phone and filter by Role</div>
+        </div>
         <a href="/admin/staff/create" class="btn btn-primary btn-sm">
-            <i class="fas fa-user-plus me-1"></i> Tạo tài khoản
+            <i class="fas fa-user-plus me-1"></i> Create Account
         </a>
-    </div>
-</div>
+    </section>
 
-<div class="card shadow-sm mb-4">
-    <div class="card-body">
-        <form method="GET" action="/admin/staff" class="row g-3 align-items-end">
-            <div class="col-md-6">
-                <label class="form-label fw-semibold">
-                    <i class="fas fa-search me-1"></i> Tìm kiếm
-                </label>
-                <input type="text" name="search" class="form-control" placeholder="Nhập tên hoặc email..."
-                    value="<%= search || '' %>">
+    <section class="users-card">
+        <form method="POST" action="/admin/staff/import" enctype="multipart/form-data" class="users-grid align-items-end">
+            <div>
+                <label class="form-label fw-semibold mb-1">Import Bulk (Excel/CSV)</label>
+                <input type="file" name="staffFile" class="form-control" accept=".csv,.xlsx,.xls" required>
+                <small class="text-muted">Columns: `fullName, email, phone, role`</small>
             </div>
-
-            <div class="col-md-3">
-                <label class="form-label fw-semibold">
-                    <i class="fas fa-filter me-1"></i> Vai trò
-                </label>
-                <select name="role" class="form-select">
-                    <option value="ALL" <%= role === 'ALL' ? 'selected' : '' %>>Tất cả</option>
-                    <option value="DRIVER" <%= role === 'DRIVER' ? 'selected' : '' %>>Tài xế</option>
-                    <option value="CONDUCTOR" <%= role === 'CONDUCTOR' ? 'selected' : '' %>>Phụ xe</option>
-                </select>
-            </div>
-
-            <div class="col-md-3">
-                <button type="submit" class="btn btn-primary w-100">
-                    <i class="fas fa-search me-1"></i> Tìm kiếm
+            <div>
+                <button type="submit" class="btn btn-outline-primary w-100">
+                    <i class="fas fa-upload me-1"></i> Import Staff
                 </button>
             </div>
         </form>
-    </div>
-</div>
+    </section>
 
-<div class="card shadow-sm">
-    <div class="card-header bg-light d-flex justify-content-between align-items-center">
-        <span>
-            <i class="fas fa-list me-2"></i>
-            <strong>Danh sách tài khoản (<%= users && users.length || 0 %> kết quả)</strong>
-        </span>
-    </div>
-
-    <div class="card-body p-0">
-        <% if (!users || users.length === 0) { %>
-            <div class="text-center py-5 text-muted">
-                <i class="fas fa-user-slash fa-3x mb-3 opacity-25"></i>
-                <p class="mb-0">
-                    <% if (search || (role && role !== 'ALL')) { %>
-                        Không tìm thấy tài khoản nào với tiêu chí tìm kiếm này.
-                    <% } else { %>
-                        Chưa có tài khoản nhân viên nào.
-                    <% } %>
-                </p>
+    <section class="users-card">
+        <form method="GET" action="/admin/staff" class="users-grid align-items-end">
+            <div>
+                <label class="form-label fw-semibold mb-1">Search</label>
+                <input type="text" name="search" class="form-control" placeholder="Name, email or phone..." value="<%= search || '' %>">
             </div>
+            <div>
+                <label class="form-label fw-semibold mb-1">Role</label>
+                <select name="role" class="form-select">
+                    <option value="ALL" <%= role === 'ALL' ? 'selected' : '' %>>All</option>
+                    <option value="DRIVER" <%= role === 'DRIVER' ? 'selected' : '' %>>Driver</option>
+                    <option value="CONDUCTOR" <%= role === 'CONDUCTOR' ? 'selected' : '' %>>Conductor</option>
+                </select>
+            </div>
+            <div>
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="fas fa-search me-1"></i> Apply
+                </button>
+            </div>
+        </form>
+    </section>
+
+    <section class="users-card p-0 overflow-hidden">
+        <div class="px-3 py-2 border-bottom bg-light">
+            <strong>Users (<%= users && users.length || 0 %>)</strong>
+        </div>
+        <% if (!users || users.length === 0) { %>
+            <div class="text-center py-5 text-muted">No staff records.</div>
         <% } else { %>
             <div class="table-responsive">
                 <table class="table table-hover align-middle mb-0">
                     <thead class="table-light">
                         <tr>
-                            <th style="width: 50px;" class="text-center">#</th>
-                            <th>Thông tin</th>
-                            <th style="width: 150px;">Email</th>
-                            <th style="width: 100px;">Vai trò</th>
-                            <th style="width: 120px;">Trạng thái</th>
-                            <th style="width: 100px;">Ngày tạo</th>
-                            <th style="width: 100px;" class="text-center">Thao tác</th>
+                            <th class="text-center">#</th>
+                            <th>User</th>
+                            <th>Login</th>
+                            <th>Role</th>
+                            <th>Status</th>
+                            <th>Created</th>
+                            <th class="text-center">Action</th>
                         </tr>
                     </thead>
                     <tbody>
                         <% users.forEach((user, index) => { %>
                             <tr>
-                                <td class="text-center text-muted small">
-                                    <strong><%= index + 1 %></strong>
-                                </td>
+                                <td class="text-center"><%= index + 1 %></td>
                                 <td>
-                                    <div class="d-flex align-items-center gap-3">
-                                        <img src="<%= user.avatar || '/images/default-avatar.png' %>"
-                                            alt="<%= user.fullName %>"
-                                            class="rounded-circle border" width="40" height="40"
-                                            style="object-fit: cover;">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <img src="<%= user.avatar || '/images/default-avatar.png' %>" alt="<%= user.fullName %>" class="users-avatar">
                                         <div>
                                             <div class="fw-semibold"><%= user.fullName %></div>
-                                            <% if (user.phone) { %>
-                                                <small class="text-muted d-block"><i class="fas fa-phone-alt me-1"></i><%= user.phone %></small>
-                                            <% } %>
+                                            <small class="text-muted"><i class="fas fa-phone me-1"></i><%= user.phone || 'N/A' %></small>
                                         </div>
                                     </div>
                                 </td>
+                                <td><small class="text-muted"><%= user.email || user.phone || 'N/A' %></small></td>
                                 <td>
-                                    <small class="text-muted">
-                                        <i class="fas fa-envelope me-1"></i><%= user.email %>
-                                    </small>
-                                </td>
-                                <td>
-                                    <% if (user.role === 'DRIVER') { %>
-                                        <span class="badge bg-primary"><i class="fas fa-steering-wheel me-1"></i> Tài xế</span>
-                                    <% } else if (user.role === 'CONDUCTOR' || user.role === 'ASSISTANT') { %>
-                                        <span class="badge bg-info"><i class="fas fa-ticket-alt me-1"></i> Phụ xe</span>
-                                    <% } else { %>
-                                        <span class="badge bg-secondary"><%= user.role %></span>
-                                    <% } %>
+                                    <span class="badge <%= user.role === 'DRIVER' ? 'bg-primary' : 'bg-info' %>">
+                                        <%= user.role %>
+                                    </span>
                                 </td>
                                 <td>
-                                    <% if (user.isLocked) { %>
-                                        <span class="badge bg-danger"><i class="fas fa-lock me-1"></i> Đã khóa</span>
-                                    <% } else if (!user.isVerified) { %>
-                                        <span class="badge bg-warning text-dark"><i class="fas fa-clock me-1"></i> Chờ xác thực</span>
-                                    <% } else { %>
-                                        <span class="badge bg-success"><i class="fas fa-check-circle me-1"></i> Hoạt động</span>
-                                    <% } %>
+                                    <% const locked = user.status === 'LOCKED' || user.isLocked; %>
+                                    <span class="badge <%= locked ? 'bg-danger' : 'bg-success' %>">
+                                        <%= locked ? 'LOCKED' : 'ACTIVE' %>
+                                    </span>
                                 </td>
-                                <td class="small text-muted">
-                                    <%= new Date(user.createdAt).toLocaleDateString('vi-VN') %>
-                                </td>
+                                <td class="small text-muted"><%= new Date(user.createdAt).toLocaleDateString('vi-VN') %></td>
                                 <td class="text-center">
-                                    <% if (user.role !== 'ADMIN') { %>
-                                        <form method="POST" action="/admin/staff/<%= user._id %>/toggle-lock" class="d-inline"
-                                              onsubmit="return confirm('<%= user.isLocked ? 'Mở khóa' : 'Khóa' %> tài khoản <%= user.email %>?');">
-                                            <button type="submit" class="btn btn-sm <%= user.isLocked ? 'btn-success' : 'btn-outline-danger' %>">
-                                                <i class="fas fa-<%= user.isLocked ? 'lock-open' : 'lock' %> me-1"></i>
-                                                <%= user.isLocked ? 'Mở' : 'Khóa' %>
-                                            </button>
-                                        </form>
-                                    <% } else { %>
-                                        <span class="text-muted small">Quản trị viên</span>
-                                    <% } %>
+                                    <form method="POST" action="/admin/staff/<%= user._id %>/toggle-lock" class="d-inline js-staff-lock-form"
+                                        data-confirm-title="<%= (user.status === 'LOCKED' || user.isLocked) ? 'Mo khoa tai khoan?' : 'Khoa tai khoan?' %>"
+                                        data-confirm-text="<%= user.email || user.phone %>"
+                                        data-confirm-button="<%= (user.status === 'LOCKED' || user.isLocked) ? 'Mo khoa' : 'Khoa' %>">
+                                        <button type="submit" class="btn btn-sm <%= (user.status === 'LOCKED' || user.isLocked) ? 'btn-success' : 'btn-outline-danger' %>">
+                                            <i class="fas fa-<%= (user.status === 'LOCKED' || user.isLocked) ? 'lock-open' : 'lock' %> me-1"></i>
+                                            <%= (user.status === 'LOCKED' || user.isLocked) ? 'Unlock' : 'Lock' %>
+                                        </button>
+                                    </form>
                                 </td>
                             </tr>
-                        <% }); %>
+                        <% }) %>
                     </tbody>
                 </table>
             </div>
-
             <% if (totalPages && totalPages > 1) { %>
-                <div class="card-footer bg-light d-flex justify-content-center gap-2 flex-wrap border-top">
+                <div class="px-3 py-3 bg-light border-top d-flex justify-content-center gap-2 flex-wrap">
                     <% for (let i = 1; i <= totalPages; i++) { %>
                         <% if (i === page) { %>
                             <button class="btn btn-sm btn-primary" disabled><%= i %></button>
                         <% } else { %>
-                            <a href="/admin/staff?search=<%= search || '' %>&role=<%= role || 'ALL' %>&page=<%= i %>" 
-                               class="btn btn-sm btn-outline-primary"><%= i %></a>
+                            <a href="/admin/staff?search=<%= search || '' %>&role=<%= role || 'ALL' %>&page=<%= i %>" class="btn btn-sm btn-outline-primary"><%= i %></a>
                         <% } %>
                     <% } %>
                 </div>
             <% } %>
-        <% } %> </div>
+        <% } %>
+    </section>
 </div>
 
-<div class="card border-0 bg-light mt-3">
-    <div class="card-body small text-muted">
-        <i class="fas fa-info-circle me-1 text-info"></i>
-        <strong>Ghi chú:</strong>
-        <ul class="mb-0 mt-2">
-            <li>Tài khoản bị khóa sẽ không thể đăng nhập vào ứng dụng BusDN.</li>
-            <li>Để khóa hoặc mở khóa tài khoản, nhấn nút "Khóa" hoặc "Mở".</li>
-            <li>Không thể thực hiện thao tác khóa đối với tài khoản Quản trị viên (Admin).</li>
-        </ul>
-    </div>
-</div>
+<script>
+    (function () {
+        document.querySelectorAll('.js-staff-lock-form').forEach((form) => {
+            form.addEventListener('submit', function (event) {
+                event.preventDefault();
+                if (typeof Swal === 'undefined') return form.submit();
+                Swal.fire({
+                    title: form.dataset.confirmTitle || 'Confirm?',
+                    text: form.dataset.confirmText || '',
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: form.dataset.confirmButton || 'Confirm',
+                    cancelButtonText: 'Cancel',
+                    reverseButtons: true
+                }).then((result) => {
+                    if (result.isConfirmed) form.submit();
+                });
+            });
+        });
+
+        const onboardingInfo = <%- JSON.stringify(onboardingInfo || null) %>;
+        if (!onboardingInfo || !onboardingInfo.accounts || !onboardingInfo.accounts.length || typeof Swal === 'undefined') return;
+        const lines = onboardingInfo.accounts
+            .map((item, idx) => `${idx + 1}. ${item.fullName} | ${item.username} | ${item.password}`)
+            .join('\n');
+
+        Swal.fire({
+            icon: 'success',
+            title: 'Tai khoan can gui thu cong',
+            html: `<div class="text-start"><p>${onboardingInfo.summary || ''}</p><pre class="bg-light p-2 border rounded small">${lines}</pre></div>`,
+            confirmButtonText: 'Da xem'
+        });
+    })();
+</script>
