@@ -109,10 +109,10 @@ const BusSchema = new mongoose.Schema({
     licensePlate: { type: String, required: true, unique: true },
     brand: String,
     capacity: { type: Number, default: 45 },
-    status: { 
-        type: String, 
-        enum: ['READY', 'RUNNING', 'MAINTENANCE'], 
-        default: 'READY' 
+    status: {
+        type: String,
+        enum: ['READY', 'RUNNING', 'MAINTENANCE'],
+        default: 'READY'
     }
 }, { timestamps: true });
 
@@ -125,23 +125,29 @@ const ScheduleSchema = new mongoose.Schema({
     shiftTime: {
         start: String,
         end: String
-    }
+    },
+    // Trip log fields (updated after completion)
+    actualStart: { type: String, default: null },
+    actualEnd: { type: String, default: null },
+    passengerCount: { type: Number, default: 0 },
+    revenue: { type: Number, default: 0 },
+    notes: { type: String, default: '' }
 }, { timestamps: true });
 
 // --- 6. HỒ SƠ ƯU TIÊN CHI TIẾT (PRIORITY PROFILE - Model 1) ---
 const PriorityProfileSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    category: { 
-        type: String, 
+    category: {
+        type: String,
         enum: ['Student', 'War Veteran', 'Disabled', 'Elderly', 'Other'],
-        required: true 
+        required: true
     },
     idNumber: { type: String, required: true },
     idCardImageFront: { type: String, required: true },
     idCardImageBack: { type: String, required: true },
     proofImage: { type: String, required: true },
-    status: { 
-        type: String, 
+    status: {
+        type: String,
         enum: ['pending', 'approved', 'rejected'],
         default: 'pending'
     },
@@ -220,6 +226,21 @@ const MonthlyPassSchema = new mongoose.Schema({
 // Index để tránh mua trùng vé cùng tuyến trong cùng 1 tháng
 MonthlyPassSchema.index({ userId: 1, routeId: 1, month: 1, year: 1 }, { unique: true });
 
+// --- 9. BÁO CÁO MẤT ĐỒ ---
+const LostFoundSchema = new mongoose.Schema({
+    description: { type: String, required: true, trim: true },
+    location: { type: String, required: true, trim: true },
+    reporter: { type: String, default: '', trim: true },
+    phone: { type: String, default: '', trim: true },
+    date: { type: Date, default: Date.now },
+    status: {
+        type: String,
+        enum: ['PENDING', 'RESOLVED', 'CLOSED'],
+        default: 'PENDING'
+    },
+    notes: { type: String, default: '' }
+}, { timestamps: true });
+
 // --- XUẤT MODELS ---
 module.exports = {
     User: mongoose.models.User || mongoose.model('User', UserSchema),
@@ -231,5 +252,6 @@ module.exports = {
     PriorityHistory: mongoose.models.PriorityHistory || mongoose.model('PriorityHistory', PriorityHistorySchema),
     PhoneVerification: mongoose.models.PhoneVerification || mongoose.model('PhoneVerification', PhoneVerificationSchema),
     WalletTransaction: mongoose.models.WalletTransaction || mongoose.model('WalletTransaction', WalletTransactionSchema),
-    MonthlyPass: mongoose.models.MonthlyPass || mongoose.model('MonthlyPass', MonthlyPassSchema)
+    MonthlyPass: mongoose.models.MonthlyPass || mongoose.model('MonthlyPass', MonthlyPassSchema),
+    LostFound: mongoose.models.LostFound || mongoose.model('LostFound', LostFoundSchema)
 };
