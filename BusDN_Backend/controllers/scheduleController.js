@@ -42,6 +42,7 @@ exports.getSchedules = async (req, res) => {
     try {
         const schedules = await Schedule.find()
             .populate('driverId', 'fullName phone email avatar')
+            .populate('conductorId', 'fullName phone email avatar')
             .populate('busId', 'licensePlate brand capacity')
             .populate('routeId', 'routeNumber name')
             .sort({ date: -1, 'shiftTime.start': 1 });
@@ -53,19 +54,20 @@ exports.getSchedules = async (req, res) => {
 
 exports.createSchedule = async (req, res) => {
     try {
-        const { driverId, busId, routeId, date, shiftStart, shiftEnd } = req.body;
+        const { driverId, conductorId, busId, routeId, date, shiftStart, shiftEnd } = req.body;
         if (!routeId || !date) return res.status(400).json({ ok: false, message: 'Tuyến và ngày là bắt buộc' });
 
         const newSchedule = await Schedule.create({
             driverId: driverId || null,
+            conductorId: conductorId || null,
             busId: busId || null,
-            routeId,
-            date,
+            routeId, date,
             shiftTime: { start: shiftStart, end: shiftEnd }
         });
 
         const populated = await Schedule.findById(newSchedule._id)
             .populate('driverId', 'fullName phone email avatar')
+            .populate('conductorId', 'fullName phone email avatar')
             .populate('busId', 'licensePlate brand capacity')
             .populate('routeId', 'routeNumber name');
 
@@ -79,16 +81,17 @@ exports.createSchedule = async (req, res) => {
 exports.updateSchedule = async (req, res) => {
     try {
         const { id } = req.params;
-        const { driverId, busId, routeId, date, shiftStart, shiftEnd } = req.body;
+        const { driverId, conductorId, busId, routeId, date, shiftStart, shiftEnd } = req.body;
 
         const updated = await Schedule.findByIdAndUpdate(id, {
             driverId: driverId || null,
+            conductorId: conductorId || null,
             busId: busId || null,
-            routeId,
-            date,
+            routeId, date,
             shiftTime: { start: shiftStart, end: shiftEnd }
         }, { new: true })
             .populate('driverId', 'fullName phone email avatar')
+            .populate('conductorId', 'fullName phone email avatar')
             .populate('busId', 'licensePlate brand capacity')
             .populate('routeId', 'routeNumber name');
 
