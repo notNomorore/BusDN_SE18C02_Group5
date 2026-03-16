@@ -118,9 +118,10 @@ const BusSchema = new mongoose.Schema({
 
 // --- 5. LỊCH CHẠY (SCHEDULE) ---
 const ScheduleSchema = new mongoose.Schema({
-    driverId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    busId: { type: mongoose.Schema.Types.ObjectId, ref: 'Bus' },
-    routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route' },
+    driverId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    conductorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }, // Phụ xe
+    busId: { type: mongoose.Schema.Types.ObjectId, ref: 'Bus', default: null },
+    routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route', required: true },
     date: { type: Date, required: true },
     shiftTime: {
         start: String,
@@ -226,7 +227,24 @@ const MonthlyPassSchema = new mongoose.Schema({
 // Index để tránh mua trùng vé cùng tuyến trong cùng 1 tháng
 MonthlyPassSchema.index({ userId: 1, routeId: 1, month: 1, year: 1 }, { unique: true });
 
-// --- 9. BÁO CÁO MẤT ĐỒ ---
+// --- 9. THÔNG BÁO IN-APP ---
+const NotificationSchema = new mongoose.Schema({
+    title: { type: String, required: true, trim: true },
+    message: { type: String, required: true, trim: true },
+    audience: {
+        type: String,
+        enum: ['ALL', 'DRIVERS', 'CONDUCTORS'],
+        default: 'ALL'
+    },
+    targetRoles: [{
+        type: String,
+        enum: ['PASSENGER', 'DRIVER', 'CONDUCTOR', 'ADMIN']
+    }],
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    sentAt: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+// --- 10. BÁO CÁO MẤT ĐỒ ---
 const LostFoundSchema = new mongoose.Schema({
     description: { type: String, required: true, trim: true },
     location: { type: String, required: true, trim: true },
@@ -241,6 +259,30 @@ const LostFoundSchema = new mongoose.Schema({
     notes: { type: String, default: '' }
 }, { timestamps: true });
 
+// --- 11. PHẢN HỒI / KHIẾU NẠI KHÁCH HÀNG ---
+const FeedbackSchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    name: { type: String, default: '', trim: true },
+    email: { type: String, default: '', trim: true },
+    phone: { type: String, default: '', trim: true },
+    subject: { type: String, default: '', trim: true },
+    message: { type: String, required: true, trim: true },
+    rating: { type: Number, min: 1, max: 5, default: null },
+    category: {
+        type: String,
+        enum: ['COMPLAINT', 'SUGGESTION', 'PRAISE', 'OTHER'],
+        default: 'COMPLAINT'
+    },
+    status: {
+        type: String,
+        enum: ['NEW', 'IN_PROGRESS', 'RESPONDED', 'CLOSED'],
+        default: 'NEW'
+    },
+    adminReply: { type: String, default: '', trim: true },
+    repliedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    repliedAt: { type: Date, default: null }
+}, { timestamps: true });
+
 // --- XUẤT MODELS ---
 module.exports = {
     User: mongoose.models.User || mongoose.model('User', UserSchema),
@@ -253,5 +295,7 @@ module.exports = {
     PhoneVerification: mongoose.models.PhoneVerification || mongoose.model('PhoneVerification', PhoneVerificationSchema),
     WalletTransaction: mongoose.models.WalletTransaction || mongoose.model('WalletTransaction', WalletTransactionSchema),
     MonthlyPass: mongoose.models.MonthlyPass || mongoose.model('MonthlyPass', MonthlyPassSchema),
-    LostFound: mongoose.models.LostFound || mongoose.model('LostFound', LostFoundSchema)
+    Notification: mongoose.models.Notification || mongoose.model('Notification', NotificationSchema),
+    LostFound: mongoose.models.LostFound || mongoose.model('LostFound', LostFoundSchema),
+    Feedback: mongoose.models.Feedback || mongoose.model('Feedback', FeedbackSchema)
 };

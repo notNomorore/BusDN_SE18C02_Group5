@@ -1,10 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const authMiddleware = require('../middleware/authMiddleware');
-const { User, Route, Stop, PriorityProfile, MonthlyPass, WalletTransaction } = require('../models/models');
+const { User, Route, Stop, PriorityProfile, MonthlyPass, WalletTransaction, Schedule, Bus, LostFound, Notification, Feedback } = require('../models/models');
 const bcrypt = require('bcryptjs');
 const { emitPendingPriorityCount, applyPriorityDiscount, applyPriorityExpiryForUser } = require('../utils/priorityUtils');
 const scheduleController = require('../controllers/scheduleController'); // NEW
+const { getIO } = require('../config/socket');
 
 function makePassCode(year, month, userId) {
     const mm = String(month).padStart(2, "0");
@@ -108,16 +109,22 @@ router.post('/user/update-profile', authMiddleware, async (req, res) => {
  */
 router.post('/user/change-password', authMiddleware, async (req, res) => {
     try {
-        const { oldPassword, newPassword } = req.body;
+        const { oldPassword, newPassword, isFirstLogin } = req.body;
         const user = await User.findById(req.user.userId);
 
         if (!user) {
             return res.status(404).json({ ok: false, message: 'Người dùng không tồn tại' });
         }
 
-        const isMatch = await bcrypt.compare(oldPassword, user.password);
-        if (!isMatch) {
-            return res.status(400).json({ ok: false, message: 'Mật khẩu cũ không đúng' });
+        // First-login flow: skip old password check
+        if (!isFirstLogin) {
+            if (!oldPassword) {
+                return res.status(400).json({ ok: false, message: 'Vui lòng nhập mật khẩu cũ' });
+            }
+            const isMatch = await bcrypt.compare(oldPassword, user.password);
+            if (!isMatch) {
+                return res.status(400).json({ ok: false, message: 'Mật khẩu cũ không đúng' });
+            }
         }
 
         const salt = await bcrypt.genSalt(10);
@@ -682,21 +689,31 @@ router.post('/user/passes/monthly/purchase', authMiddleware, async (req, res) =>
 });
 
 // ============================
-// NOTIFICATIONS (Placeholder)
+// NOTIFICATIONS (In-app + Socket.IO)
 // ============================
+
+const mapAudienceToRoles = (audience) => {
+    if (audience === 'DRIVERS') return ['DRIVER', 'CONDUCTOR'];
+    if (audience === 'CONDUCTORS') return ['CONDUCTOR'];
+    return ['PASSENGER', 'DRIVER', 'CONDUCTOR', 'ADMIN'];
+};
 
 /**
  * GET /api/notifications
- * Get user notifications
+ * Get notifications for current user role
  * Auth: Required
  */
 router.get('/notifications', authMiddleware, async (req, res) => {
     try {
-        // Placeholder - implement notification system as needed
-        res.json({
-            ok: true,
-            notifications: [] // Return empty array for now
-        });
+        const user = await User.findById(req.user.userId).select('role');
+        if (!user) return res.status(404).json({ ok: false, message: 'Người dùng không tồn tại' });
+
+        const notifications = await Notification.find({ targetRoles: user.role })
+            .sort({ sentAt: -1, createdAt: -1 })
+            .limit(100)
+            .lean();
+
+        res.json({ ok: true, notifications });
     } catch (error) {
         console.error('Error fetching notifications:', error);
         res.status(500).json({ ok: false, message: 'Lỗi server' });
@@ -705,7 +722,7 @@ router.get('/notifications', authMiddleware, async (req, res) => {
 
 /**
  * POST /api/admin/notifications/broadcast
- * Gửi thông báo hàng loạt — lưu log vào DB (stub) và trả về OK
+ * Gửi thông báo hàng loạt + lưu DB + đẩy realtime Socket.IO
  */
 router.post('/admin/notifications/broadcast', authMiddleware, async (req, res) => {
     try {
@@ -714,19 +731,41 @@ router.post('/admin/notifications/broadcast', authMiddleware, async (req, res) =
             return res.status(403).json({ ok: false, message: 'Forbidden' });
         }
 
-        const { audience, title, message } = req.body;
+        const { audience = 'ALL', title, message } = req.body;
         if (!title || !message) {
             return res.status(400).json({ ok: false, message: 'Tiêu đề và nội dung là bắt buộc' });
         }
 
-        // In a full implementation this would push to FCM / Socket.IO.
-        // For now we log and return success so the frontend works.
-        console.log(`[BROADCAST] audience=${audience} | title="${title}" | message="${message}" | by=${adminUser.email}`);
+        const targetRoles = mapAudienceToRoles(audience);
+
+        const created = await Notification.create({
+            title: String(title).trim(),
+            message: String(message).trim(),
+            audience,
+            targetRoles,
+            createdBy: adminUser._id,
+            sentAt: new Date()
+        });
+
+        const io = getIO();
+        if (io) {
+            targetRoles.forEach((role) => {
+                io.to(`role:${role}`).emit('notification:new', {
+                    _id: created._id,
+                    title: created.title,
+                    message: created.message,
+                    audience: created.audience,
+                    targetRoles: created.targetRoles,
+                    sentAt: created.sentAt
+                });
+            });
+        }
 
         res.json({
             ok: true,
-            message: `Đã gửi thông báo "${title}" đến ${audience === 'DRIVERS' ? 'tài xế' : 'tất cả người dùng'} thành công.`,
-            sentAt: new Date().toISOString()
+            message: `Đã gửi thông báo "${created.title}" đến ${audience === 'DRIVERS' ? 'tài xế' : audience === 'CONDUCTORS' ? 'phụ xe' : 'tất cả người dùng'} thành công.`,
+            sentAt: created.sentAt,
+            notification: created
         });
     } catch (err) {
         console.error('Error broadcasting notification:', err);
@@ -1269,6 +1308,108 @@ router.patch('/admin/schedules/:id/log', authMiddleware, scheduleController.upda
 router.put('/admin/buses/:id', authMiddleware, scheduleController.updateBus);
 
 /**
+ * Báo cáo doanh thu (Revenue Reports)
+ * GET /api/admin/reports/revenue?from=YYYY-MM-DD&to=YYYY-MM-DD&group=day|route
+ */
+router.get('/admin/reports/revenue', authMiddleware, async (req, res) => {
+    try {
+        const adminUser = await User.findById(req.user.userId).select('role');
+        if (!adminUser || !['ADMIN', 'STAFF'].includes(adminUser.role)) {
+            return res.status(403).json({ ok: false, message: 'Forbidden' });
+        }
+
+        const { from, to, group = 'day' } = req.query;
+        const match = {};
+
+        if (from || to) {
+            match.date = {};
+            if (from) {
+                match.date.$gte = new Date(from);
+            }
+            if (to) {
+                const end = new Date(to);
+                end.setHours(23, 59, 59, 999);
+                match.date.$lte = end;
+            }
+        }
+
+        const schedules = await Schedule.find(match)
+            .populate('routeId', 'routeNumber name')
+            .lean();
+
+        let totalRevenue = 0;
+        let totalPassengers = 0;
+
+        schedules.forEach((s) => {
+            totalRevenue += Number(s.revenue || 0);
+            totalPassengers += Number(s.passengerCount || 0);
+        });
+
+        const summary = {
+            totalRevenue,
+            totalPassengers,
+            totalTrips: schedules.length,
+        };
+
+        const map = new Map();
+
+        schedules.forEach((s) => {
+            const revenue = Number(s.revenue || 0);
+            const passengers = Number(s.passengerCount || 0);
+
+            let key;
+            let label;
+
+            if (group === 'route') {
+                key = String(s.routeId?._id || 'unknown');
+                const routeNumber = s.routeId?.routeNumber || '?';
+                const routeName = s.routeId?.name || 'Tuyến không xác định';
+                label = `Tuyến ${routeNumber} - ${routeName}`;
+            } else {
+                // group by day
+                const d = s.date ? new Date(s.date) : null;
+                const iso = d ? d.toISOString().substring(0, 10) : 'N/A';
+                key = iso;
+                label = d
+                    ? d.toLocaleDateString('vi-VN', {
+                        weekday: 'short',
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                    })
+                    : 'Không rõ ngày';
+            }
+
+            if (!map.has(key)) {
+                map.set(key, {
+                    key,
+                    label,
+                    revenue: 0,
+                    passengers: 0,
+                    trips: 0,
+                });
+            }
+            const row = map.get(key);
+            row.revenue += revenue;
+            row.passengers += passengers;
+            row.trips += 1;
+        });
+
+        const rows = Array.from(map.values()).sort((a, b) => {
+            if (group === 'route') {
+                return (a.label || '').localeCompare(b.label || '');
+            }
+            return (a.key || '').localeCompare(b.key || '');
+        });
+
+        res.json({ ok: true, summary, rows, groupBy: group });
+    } catch (err) {
+        console.error('Error building revenue report:', err);
+        res.status(500).json({ ok: false, message: 'Lỗi server' });
+    }
+});
+
+/**
  * POST /api/admin/stops/:id/toggle-status
  */
 router.post('/admin/stops/:id/toggle-status', authMiddleware, async (req, res) => {
@@ -1296,7 +1437,7 @@ router.post('/admin/stops/:id/toggle-status', authMiddleware, async (req, res) =
  * PUT    /api/admin/lost-found/:id
  * DELETE /api/admin/lost-found/:id
  */
-const { LostFound } = require('../models/models');
+
 
 router.get('/admin/lost-found', authMiddleware, async (req, res) => {
     try {
@@ -1314,6 +1455,120 @@ router.post('/admin/lost-found', authMiddleware, async (req, res) => {
         const report = await LostFound.create({ description, location, reporter, phone, date, notes });
         res.json({ ok: true, message: 'Đã ghi nhận báo cáo', report });
     } catch (err) {
+        res.status(500).json({ ok: false, message: 'Lỗi server' });
+    }
+});
+
+// ============================
+// FEEDBACK / COMPLAINTS
+// ============================
+
+/**
+ * POST /api/feedback
+ * Hành khách gửi phản hồi / khiếu nại / đánh giá
+ * Auth: Optional (nếu đã đăng nhập sẽ gắn userId)
+ */
+router.post('/feedback', authMiddleware, async (req, res) => {
+    try {
+        const { subject, message, rating, category } = req.body;
+
+        if (!message || !String(message).trim()) {
+            return res.status(400).json({ ok: false, message: 'Nội dung phản hồi là bắt buộc' });
+        }
+
+        const user = await User.findById(req.user.userId).select('fullName email phone').lean();
+
+        const doc = await Feedback.create({
+            userId: user?._id || null,
+            name: user?.fullName || '',
+            email: user?.email || '',
+            phone: user?.phone || '',
+            subject: subject || '',
+            message: message.trim(),
+            rating: typeof rating === 'number' ? rating : null,
+            category: category || 'COMPLAINT',
+        });
+
+        res.json({ ok: true, message: 'Đã ghi nhận phản hồi của bạn', feedback: doc });
+    } catch (err) {
+        console.error('Error creating feedback:', err);
+        res.status(500).json({ ok: false, message: 'Lỗi server' });
+    }
+});
+
+/**
+ * GET /api/admin/feedback
+ * Admin xem danh sách phản hồi khách hàng
+ * Query: status (optional)
+ */
+router.get('/admin/feedback', authMiddleware, async (req, res) => {
+    try {
+        const adminUser = await User.findById(req.user.userId).select('role');
+        if (!adminUser || !['ADMIN', 'STAFF'].includes(adminUser.role)) {
+            return res.status(403).json({ ok: false, message: 'Forbidden' });
+        }
+
+        const { status } = req.query;
+        const filter = {};
+
+        if (status && ['NEW', 'IN_PROGRESS', 'RESPONDED', 'CLOSED'].includes(status)) {
+            filter.status = status;
+        }
+
+        const items = await Feedback.find(filter)
+            .sort({ createdAt: -1 })
+            .populate('userId', 'fullName email phone')
+            .populate('repliedBy', 'fullName email')
+            .lean();
+
+        res.json({ ok: true, feedback: items });
+    } catch (err) {
+        console.error('Error fetching feedback for admin:', err);
+        res.status(500).json({ ok: false, message: 'Lỗi server' });
+    }
+});
+
+/**
+ * POST /api/admin/feedback/:id/reply
+ * Admin trả lời / cập nhật trạng thái phản hồi
+ * Body: { replyText, status }
+ */
+router.post('/admin/feedback/:id/reply', authMiddleware, async (req, res) => {
+    try {
+        const adminUser = await User.findById(req.user.userId).select('role');
+        if (!adminUser || !['ADMIN', 'STAFF'].includes(adminUser.role)) {
+            return res.status(403).json({ ok: false, message: 'Forbidden' });
+        }
+
+        const { id } = req.params;
+        const { replyText, status } = req.body;
+
+        const update = {};
+        if (replyText !== undefined) {
+            update.adminReply = String(replyText || '').trim();
+            update.repliedBy = adminUser._id;
+            update.repliedAt = new Date();
+        }
+
+        if (status && ['NEW', 'IN_PROGRESS', 'RESPONDED', 'CLOSED'].includes(status)) {
+            update.status = status;
+        } else if (replyText !== undefined && !status) {
+            // Nếu có trả lời nhưng không gửi status, mặc định chuyển sang RESPONDED
+            update.status = 'RESPONDED';
+        }
+
+        const doc = await Feedback.findByIdAndUpdate(id, update, { new: true })
+            .populate('userId', 'fullName email phone')
+            .populate('repliedBy', 'fullName email')
+            .lean();
+
+        if (!doc) {
+            return res.status(404).json({ ok: false, message: 'Không tìm thấy phản hồi' });
+        }
+
+        res.json({ ok: true, message: 'Đã cập nhật phản hồi', feedback: doc });
+    } catch (err) {
+        console.error('Error replying feedback:', err);
         res.status(500).json({ ok: false, message: 'Lỗi server' });
     }
 });
@@ -1338,6 +1593,110 @@ router.delete('/admin/lost-found/:id', authMiddleware, async (req, res) => {
     }
 });
 
-module.exports = router;
+// ============================
+// DRIVER / CONDUCTOR PORTAL APIs
+// ============================
 
+/**
+ * GET /api/driver/schedule
+ * Returns schedules assigned to the logged-in DRIVER (by driverId)
+ */
+router.get('/driver/schedule', authMiddleware, async (req, res) => {
+    try {
+        const schedules = await Schedule.find({ driverId: req.user.userId })
+            .populate('conductorId', 'fullName phone')
+            .populate('busId', 'licensePlate brand capacity')
+            .populate('routeId', 'routeNumber name')
+            .sort({ date: -1 });
+        res.json({ ok: true, schedules });
+    } catch (err) {
+        res.status(500).json({ ok: false, message: 'Lỗi server' });
+    }
+});
+
+/**
+ * GET /api/conductor/schedule
+ * Returns schedules assigned to the logged-in CONDUCTOR (by conductorId)
+ */
+router.get('/conductor/schedule', authMiddleware, async (req, res) => {
+    try {
+        const schedules = await Schedule.find({ conductorId: req.user.userId })
+            .populate('driverId', 'fullName phone')
+            .populate('busId', 'licensePlate brand capacity')
+            .populate('routeId', 'routeNumber name')
+            .sort({ date: -1 });
+        res.json({ ok: true, schedules });
+    } catch (err) {
+        res.status(500).json({ ok: false, message: 'Lỗi server' });
+    }
+});
+
+/**
+ * POST /api/driver/incident
+ * Driver submits an emergency incident report
+ */
+router.post('/driver/incident', authMiddleware, async (req, res) => {
+    try {
+        const { type, location, details, severity } = req.body;
+        if (!location) return res.status(400).json({ ok: false, message: 'Vị trí là bắt buộc' });
+        // Log to console (extend with Incident model if needed)
+        console.log(`[INCIDENT] driver=${req.user.userId} type=${type} severity=${severity} loc="${location}" details="${details}"`);
+        res.json({ ok: true, message: 'Đã nhận báo cáo sự cố. Trung tâm sẽ xử lý ngay.' });
+    } catch (err) {
+        res.status(500).json({ ok: false, message: 'Lỗi server' });
+    }
+});
+
+/**
+ * POST /api/driver/confirm-handover
+ * Driver confirms vehicle receipt at start of shift
+ */
+router.post('/driver/confirm-handover', authMiddleware, async (req, res) => {
+    try {
+        const { scheduleId } = req.body;
+        console.log(`[HANDOVER] driver=${req.user.userId} schedule=${scheduleId} at=${new Date().toISOString()}`);
+        res.json({ ok: true, message: 'Đã xác nhận nhận xe.' });
+    } catch (err) {
+        res.status(500).json({ ok: false, message: 'Lỗi server' });
+    }
+});
+
+/**
+ * POST /api/conductor/validate-qr
+ * Conductor validates a passenger QR code (monthly pass or ticket)
+ * Body: { code: string }
+ */
+router.post('/conductor/validate-qr', authMiddleware, async (req, res) => {
+    try {
+        const { code } = req.body;
+        if (!code) return res.status(400).json({ ok: false, message: 'Mã QR không được để trống' });
+
+        // Try to find a monthly pass with this ID
+        const { MonthlyPass, User } = require('../models/models');
+        const pass = await MonthlyPass.findById(code.trim())
+            .populate('userId', 'fullName')
+            .populate('routeId', 'routeNumber name');
+
+        if (!pass) {
+            return res.json({ ok: false, message: 'Mã vé không tồn tại hoặc không hợp lệ' });
+        }
+
+        const now = new Date();
+        if (pass.endDate && new Date(pass.endDate) < now) {
+            return res.json({ ok: false, message: `Vé đã hết hạn (${new Date(pass.endDate).toLocaleDateString('vi-VN')})` });
+        }
+
+        res.json({
+            ok: true,
+            message: 'Vé hợp lệ',
+            passengerName: pass.userId?.fullName,
+            routeNumber: pass.routeId?.routeNumber,
+            validUntil: pass.endDate ? new Date(pass.endDate).toLocaleDateString('vi-VN') : 'Không giới hạn'
+        });
+    } catch (err) {
+        res.status(500).json({ ok: false, message: 'Lỗi server' });
+    }
+});
+
+module.exports = router;
 

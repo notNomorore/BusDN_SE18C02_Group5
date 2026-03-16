@@ -5,6 +5,7 @@ const path = require('path');
 const session = require('express-session');
 const passport = require('passport');
 const { Server } = require('socket.io');
+const jwt = require('jsonwebtoken');
 const connectDB = require('./config/connectdb');
 const models = require("./models/models");
 const { Route, Schedule, User } = models;
@@ -40,6 +41,19 @@ app.use(session({
 io.on('connection', (socket) => {
     socket.on('admin:join', () => {
         socket.join('admins');
+    });
+
+    socket.on('auth:join', ({ token }) => {
+        try {
+            if (!token || typeof token !== 'string') return;
+            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret_key');
+            if (!decoded?.userId || !decoded?.role) return;
+
+            socket.join(`user:${decoded.userId}`);
+            socket.join(`role:${decoded.role}`);
+        } catch (err) {
+            // ignore invalid token
+        }
     });
 });
 
