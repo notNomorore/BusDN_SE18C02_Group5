@@ -71,6 +71,7 @@ app.get('/auth/google/callback',
 app.get('/', (req, res) => {
     if (!req.session.userId) return res.redirect("/login");
     if (req.session.role === "ADMIN") return res.redirect("/admin/dashboard");
+    if (req.session.role === "FINANCE") return res.redirect("/admin/fares");
     return res.redirect('/home');
 });
 

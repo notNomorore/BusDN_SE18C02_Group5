@@ -291,6 +291,17 @@ exports.approveProfile = async (req, res) => {
             expiryDate = new Date(expiryDate);
         }
 
+        if (Number.isNaN(expiryDate.getTime())) {
+            return res.status(400).json({ error: 'Expiry date is invalid' });
+        }
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        expiryDate.setHours(0, 0, 0, 0);
+        if (expiryDate < today) {
+            return res.status(400).json({ error: 'Expiry date cannot be in the past' });
+        }
+
         // Update profile
         profile.status = 'approved';
         profile.expiryDate = expiryDate;

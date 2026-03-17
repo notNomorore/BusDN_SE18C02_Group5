@@ -65,6 +65,7 @@ module.exports = (upload) => {
             req.session.role = user.role;
 
             if (user.role === 'ADMIN') return res.redirect('/admin/dashboard');
+            if (user.role === 'FINANCE') return res.redirect('/admin/fares');
             if (user.role === 'PASSENGER') return res.redirect('/home');
             return res.redirect('/profile');
         } catch (err) {
@@ -183,7 +184,8 @@ module.exports = (upload) => {
         const error = req.query.error;
         const success = req.query.success;
 
-        res.render('profile', { user: req.user, error, success });
+        if (!user) return res.redirect('/login');
+        res.render('profile', { user, error, success });
     });
 
     // --- UPLOAD AVATAR ---

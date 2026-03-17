@@ -210,12 +210,18 @@
                                     </div>
 
                                     <script>
+                                        const todayDateString = new Date().toISOString().slice(0, 10);
+                                        document.getElementById('filterDate').min = todayDateString;
                                         document.getElementById('filterDate').addEventListener('change', function () {
+                                            if (this.value && this.value < todayDateString) {
+                                                this.value = todayDateString;
+                                            }
                                             window.location.search = '?date=' + this.value;
                                         });
                                         function openCreateScheduleModal(evt) {
                                             const modalEl = document.getElementById('createScheduleModal');
                                             const dateInput = modalEl.querySelector('input[name=date]');
+                                            dateInput.min = todayDateString;
                                             dateInput.value = document.getElementById('filterDate').value;
                                             new bootstrap.Modal(modalEl).show();
                                         }

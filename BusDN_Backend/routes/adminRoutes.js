@@ -2,15 +2,17 @@ const express = require('express');
 const router = express.Router();
 
 // --- 1. IMPORT MIDDLEWARE & CONTROLLERS ---
-const { isAdmin } = require('../middleware/adminMiddleware');
+const { isAdmin, isFinanceOrAdmin } = require('../middleware/adminMiddleware');
 const { renderAdmin } = require('../middleware/renderAdmin');
-const { User, PriorityProfile } = require('../models/models');
+const { User } = require('../models/models');
 const adminController = require('../controllers/adminController');
 const priorityController = require('../controllers/priorityController');
 const adminRouteController = require('../controllers/adminRouteController');
-const adminStopController = require('../controllers/adminStopController');  
+const adminStopController = require('../controllers/adminStopController');
+const adminPromotionController = require('../controllers/adminPromotionController');
+const adminFareController = require('../controllers/adminFareController');
 
-// --- 2. TỔNG QUAN & HỒ SƠ (Admin Dashboard) ---
+// --- 2. TONG QUAN & HO SO ---
 router.get('/dashboard', isAdmin, (req, res) => renderAdmin(req, res, 'admin/dashboard', 'Tổng quan'));
 
 router.get('/profile', isAdmin, async (req, res) => {
@@ -22,37 +24,48 @@ router.get('/profile', isAdmin, async (req, res) => {
     }
 });
 
-// --- 3. QUẢN LÝ TUYẾN XE (Routes) ---
+// --- 3. QUAN LY TUYEN XE ---
+router.get('/routes/create', isAdmin, adminRouteController.getCreateRoutePage);
 router.get('/routes', isAdmin, adminRouteController.getRoutesPage);
 router.post('/routes/create', isAdmin, adminRouteController.createRoute);
 router.post('/routes/:id/update', isAdmin, adminRouteController.updateRoute);
 router.post('/routes/:id/deactivate', isAdmin, adminRouteController.deactivateRoute);
 router.post('/routes/:id/activate', isAdmin, adminRouteController.activateRoute);
 
-// --- 4. QUẢN LÝ TRẠM DỪNG (Stops) ---
+// --- 4. QUAN LY TRAM DUNG ---
 router.get('/stops', isAdmin, adminStopController.getStopsPage);
 router.post('/stops/create', isAdmin, adminStopController.createStop);
+router.post('/stops/create-ajax', isAdmin, adminStopController.createStopAjax);
 router.post('/stops/:id/update', isAdmin, adminStopController.updateStop);
 router.post('/stops/:id/deactivate', isAdmin, adminStopController.deactivateStop);
 router.post('/stops/:id/activate', isAdmin, adminStopController.activateStop);
-// Quản lý hồ sơ ưu tiên (Priority Profile Management)
+
+// Quan ly ho so uu tien (flow moi)
 router.get('/priority-profiles', isAdmin, priorityController.listProfiles);
 router.get('/priority-profiles/:profileId', isAdmin, priorityController.viewProfileDetail);
 router.post('/priority-profiles/:profileId/approve', isAdmin, priorityController.approveProfile);
 router.post('/priority-profiles/:profileId/reject', isAdmin, priorityController.rejectProfile);
 
-// --- 5. ĐIỀU PHỐI LỊCH CHẠY (Schedules) ---
-// Tạm thời để render view cho đến khi bạn có adminScheduleController
-router.get('/schedules', isAdmin, (req, res) => renderAdmin(req, res, 'admin/schedules', 'Điều phối Lịch'));
+// --- 5. DIEU PHOI LICH CHAY ---
+router.get('/schedules', isAdmin, (req, res) => renderAdmin(req, res, 'admin/schedules', 'Điều phối lịch'));
 
-// --- 6. QUẢN LÝ NHÂN SỰ (Staff) ---
+// --- 6. MARKETING: PROMOTIONS ---
+router.get('/promotions', isAdmin, adminPromotionController.getPromotionsPage);
+router.post('/promotions/create', isAdmin, adminPromotionController.createPromotion);
+router.post('/promotions/:id/update', isAdmin, adminPromotionController.updatePromotion);
+router.post('/promotions/:id/end-early', isAdmin, adminPromotionController.endPromotionEarly);
+
+// --- 6.1 FINANCE/ADMIN: FARE MATRIX ---
+router.get('/fares', isFinanceOrAdmin, adminFareController.getFaresPage);
+router.post('/fares/update', isFinanceOrAdmin, adminFareController.updateFares);
+
+// --- 7. QUAN LY NHAN SU ---
 router.get('/staff', isAdmin, adminController.getStaffList);
 router.get('/staff/create', isAdmin, adminController.getCreateStaff);
 router.post('/staff/create', isAdmin, adminController.createStaff);
 router.post('/staff/:userId/toggle-lock', isAdmin, adminController.toggleLock);
 
-// --- 7. QUẢN LÝ HỒ SƠ ƯU TIÊN (Priority Profiles) ---
-router.get('/priority-profiles', isAdmin, adminController.getPriorityProfiles);
+// --- 8. LEGACY PRIORITY ENDPOINTS (giu de tuong thich) ---
 router.post('/priority-profiles/:userId/approve', isAdmin, adminController.approveProfile);
 router.post('/priority-profiles/:userId/reject', isAdmin, adminController.rejectProfile);
 

@@ -1,0 +1,433 @@
+﻿<%
+const list = Array.isArray(promotions) ? promotions : [];
+const routeList = Array.isArray(routes) ? routes : [];
+const currentFilters = filters || {};
+const currentQ = currentFilters.q || '';
+const currentStatus = currentFilters.status || '';
+
+const fmtDateTime = (d) => {
+    if (!d) return '-';
+    const dt = new Date(d);
+    if (Number.isNaN(dt.getTime())) return '-';
+    return dt.toLocaleString('vi-VN');
+};
+
+const toInputDateTime = (d) => {
+    if (!d) return '';
+    const dt = new Date(d);
+    if (Number.isNaN(dt.getTime())) return '';
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+};
+
+const fmtMoney = (v) => Number(v || 0).toLocaleString('vi-VN') + ' đ';
+
+const statusBadge = (s) => {
+    if (s === 'ACTIVE') return 'bg-success';
+    if (s === 'SCHEDULED') return 'bg-primary';
+    if (s === 'DRAFT') return 'bg-secondary';
+    if (s === 'ENDED') return 'bg-dark';
+    if (s === 'CANCELLED') return 'bg-danger';
+    return 'bg-light text-dark';
+};
+
+const statusText = (s) => {
+    if (s === 'ACTIVE') return 'Đang hoạt động';
+    if (s === 'SCHEDULED') return 'Sắp diễn ra';
+    if (s === 'DRAFT') return 'Bản nháp';
+    if (s === 'ENDED') return 'Đã kết thúc';
+    if (s === 'CANCELLED') return 'Đã hủy';
+    return s || 'N/A';
+};
+
+const scopeText = (promo) => {
+    if (promo.applyScope === 'ALL') return 'Toàn bộ vé tháng';
+    if (promo.applyScope === 'INTER_ROUTE') return 'Chỉ liên tuyến';
+    if (promo.applyScope === 'SINGLE_ROUTE') {
+        const r = promo.routeId;
+        if (r && r.routeNumber) return `Đơn tuyến (${r.routeNumber})`;
+        return 'Chỉ đơn tuyến';
+    }
+    return '-';
+};
+%>
+
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <h2 class="mb-0">Quản lý khuyến mãi</h2>
+    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createPromotionModal">
+        <i class="fas fa-plus"></i> Tạo chương trình
+    </button>
+</div>
+
+<% if (success) { %>
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+    <%= success %>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+<% } %>
+
+<% if (error) { %>
+<div class="alert alert-danger alert-dismissible fade show" role="alert">
+    <%= error %>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+<% } %>
+
+<div class="card shadow-sm mb-3">
+    <div class="card-body">
+        <form method="GET" action="/admin/promotions">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-7">
+                    <label class="form-label">Tìm kiếm</label>
+                    <input type="text" name="q" class="form-control" value="<%= currentQ %>" placeholder="Mã khuyến mãi, tên chương trình...">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Trạng thái</label>
+                    <select name="status" class="form-select">
+                        <option value="">Tất cả</option>
+                        <option value="DRAFT" <%= currentStatus === 'DRAFT' ? 'selected' : '' %>>Bản nháp</option>
+                        <option value="SCHEDULED" <%= currentStatus === 'SCHEDULED' ? 'selected' : '' %>>Sắp diễn ra</option>
+                        <option value="ACTIVE" <%= currentStatus === 'ACTIVE' ? 'selected' : '' %>>Đang hoạt động</option>
+                        <option value="ENDED" <%= currentStatus === 'ENDED' ? 'selected' : '' %>>Đã kết thúc</option>
+                        <option value="CANCELLED" <%= currentStatus === 'CANCELLED' ? 'selected' : '' %>>Đã hủy</option>
+                    </select>
+                </div>
+                <div class="col-md-2 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary w-100">Lọc</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table align-middle table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th>Mã</th>
+                        <th>Tên chương trình</th>
+                        <th>Mức giảm</th>
+                        <th>Phạm vi</th>
+                        <th>Thời gian</th>
+                        <th>Trạng thái</th>
+                        <th>Hành động</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% if (!list.length) { %>
+                    <tr>
+                        <td colspan="7" class="text-center text-muted py-4">Chưa có chương trình khuyến mãi nào.</td>
+                    </tr>
+                    <% } %>
+
+                    <% list.forEach((promo, idx) => { %>
+                    <tr>
+                        <td><span class="badge bg-info"><%= promo.code %></span></td>
+                        <td>
+                            <div class="fw-semibold"><%= promo.name %></div>
+                            <small class="text-muted"><%= promo.description || 'Không có mô tả' %></small>
+                        </td>
+                        <td>
+                            <% if (promo.discountType === 'PERCENT') { %>
+                            <div><%= promo.discountValue %>%</div>
+                            <% if (promo.maxDiscountValue !== null && promo.maxDiscountValue !== undefined) { %>
+                            <small class="text-muted">Trần: <%= fmtMoney(promo.maxDiscountValue) %></small>
+                            <% } %>
+                            <% } else { %>
+                            <div><%= fmtMoney(promo.discountValue) %></div>
+                            <% } %>
+                            <small class="text-muted d-block">Đơn tối thiểu: <%= fmtMoney(promo.minOrderValue) %></small>
+                        </td>
+                        <td><%= scopeText(promo) %></td>
+                        <td>
+                            <small class="d-block"><strong>Từ:</strong> <%= fmtDateTime(promo.startAt) %></small>
+                            <small class="d-block"><strong>Đến:</strong> <%= fmtDateTime(promo.endAt) %></small>
+                        </td>
+                        <td><span class="badge <%= statusBadge(promo.status) %>"><%= statusText(promo.status) %></span></td>
+                        <td class="text-nowrap">
+                            <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editPromotionModal-<%= idx %>">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <% if (promo.status !== 'ENDED' && promo.status !== 'CANCELLED') { %>
+                            <form action="/admin/promotions/<%= promo._id %>/end-early" method="POST" class="d-inline" onsubmit="return confirm('Bạn có chắc muốn kết thúc sớm chương trình này?');">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Kết thúc sớm">
+                                    <i class="fas fa-stop-circle"></i>
+                                </button>
+                            </form>
+                            <% } %>
+                        </td>
+                    </tr>
+                    <% }) %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="createPromotionModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form action="/admin/promotions/create" method="POST" class="promotion-form">
+                <div class="modal-header">
+                    <h5 class="modal-title">Tạo chương trình khuyến mãi</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Mã *</label>
+                            <input type="text" name="code" class="form-control" required>
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label">Tên chương trình *</label>
+                            <input type="text" name="name" class="form-control" required>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Mô tả</label>
+                            <textarea name="description" class="form-control" rows="2"></textarea>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Loại giảm *</label>
+                            <select name="discountType" class="form-select" required>
+                                <option value="PERCENT">Phần trăm (%)</option>
+                                <option value="FIXED">Số tiền cố định (VND)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Giá trị giảm *</label>
+                            <input type="number" name="discountValue" class="form-control" min="1" step="1" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Trần giảm tối đa</label>
+                            <input type="number" name="maxDiscountValue" class="form-control" min="0" step="1000">
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Đơn tối thiểu</label>
+                            <input type="number" name="minOrderValue" class="form-control" min="0" step="1000" value="0">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Giới hạn tổng lượt</label>
+                            <input type="number" name="usageLimitTotal" class="form-control" min="1" step="1">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Giới hạn mỗi người *</label>
+                            <input type="number" name="usageLimitPerUser" class="form-control" min="1" step="1" value="1" required>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Phạm vi áp dụng *</label>
+                            <select name="applyScope" class="form-select js-scope" required>
+                                <option value="ALL">Tất cả vé tháng</option>
+                                <option value="SINGLE_ROUTE">Chỉ vé đơn tuyến</option>
+                                <option value="INTER_ROUTE">Chỉ vé liên tuyến</option>
+                            </select>
+                        </div>
+                        <div class="col-md-8 js-route-wrap d-none">
+                            <label class="form-label">Chọn tuyến (đơn tuyến)</label>
+                            <select name="routeId" class="form-select js-route-select">
+                                <option value="">-- Chọn tuyến --</option>
+                                <% routeList.forEach((r) => { %>
+                                <option value="<%= r._id %>"><%= r.routeNumber %> - <%= r.name %></option>
+                                <% }) %>
+                            </select>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label">Bắt đầu *</label>
+                            <input type="datetime-local" name="startAt" class="form-control" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Kết thúc *</label>
+                            <input type="datetime-local" name="endAt" class="form-control" required>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label">Trạng thái *</label>
+                            <select name="status" class="form-select" required>
+                                <option value="DRAFT">Bản nháp</option>
+                                <option value="SCHEDULED">Sắp diễn ra</option>
+                                <option value="ACTIVE">Đang hoạt động</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+                    <button type="submit" class="btn btn-primary">Tạo chương trình</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<% list.forEach((promo, idx) => { %>
+<div class="modal fade" id="editPromotionModal-<%= idx %>" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form action="/admin/promotions/<%= promo._id %>/update" method="POST" class="promotion-form">
+                <div class="modal-header">
+                    <h5 class="modal-title">Cập nhật chương trình - <%= promo.code %></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Mã *</label>
+                            <input type="text" name="code" class="form-control" value="<%= promo.code %>" required>
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label">Tên chương trình *</label>
+                            <input type="text" name="name" class="form-control" value="<%= promo.name %>" required>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Mô tả</label>
+                            <textarea name="description" class="form-control" rows="2"><%= promo.description || '' %></textarea>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Loại giảm *</label>
+                            <select name="discountType" class="form-select" required>
+                                <option value="PERCENT" <%= promo.discountType === 'PERCENT' ? 'selected' : '' %>>Phần trăm (%)</option>
+                                <option value="FIXED" <%= promo.discountType === 'FIXED' ? 'selected' : '' %>>Số tiền cố định (VND)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Giá trị giảm *</label>
+                            <input type="number" name="discountValue" class="form-control" min="1" step="1" value="<%= promo.discountValue %>" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Trần giảm tối đa</label>
+                            <input type="number" name="maxDiscountValue" class="form-control" min="0" step="1000" value="<%= promo.maxDiscountValue !== null && promo.maxDiscountValue !== undefined ? promo.maxDiscountValue : '' %>">
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Đơn tối thiểu</label>
+                            <input type="number" name="minOrderValue" class="form-control" min="0" step="1000" value="<%= promo.minOrderValue || 0 %>">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Giới hạn tổng lượt</label>
+                            <input type="number" name="usageLimitTotal" class="form-control" min="1" step="1" value="<%= promo.usageLimitTotal || '' %>">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Giới hạn mỗi người *</label>
+                            <input type="number" name="usageLimitPerUser" class="form-control" min="1" step="1" value="<%= promo.usageLimitPerUser || 1 %>" required>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">Phạm vi áp dụng *</label>
+                            <select name="applyScope" class="form-select js-scope" required>
+                                <option value="ALL" <%= promo.applyScope === 'ALL' ? 'selected' : '' %>>Tất cả vé tháng</option>
+                                <option value="SINGLE_ROUTE" <%= promo.applyScope === 'SINGLE_ROUTE' ? 'selected' : '' %>>Chỉ vé đơn tuyến</option>
+                                <option value="INTER_ROUTE" <%= promo.applyScope === 'INTER_ROUTE' ? 'selected' : '' %>>Chỉ vé liên tuyến</option>
+                            </select>
+                        </div>
+                        <div class="col-md-8 js-route-wrap <%= promo.applyScope === 'SINGLE_ROUTE' ? '' : 'd-none' %>">
+                            <label class="form-label">Chọn tuyến (đơn tuyến)</label>
+                            <select name="routeId" class="form-select js-route-select" <%= promo.applyScope === 'SINGLE_ROUTE' ? 'required' : '' %>>
+                                <option value="">-- Chọn tuyến --</option>
+                                <% routeList.forEach((r) => { %>
+                                <option value="<%= r._id %>" <%= promo.routeId && String(promo.routeId._id || promo.routeId) === String(r._id) ? 'selected' : '' %>><%= r.routeNumber %> - <%= r.name %></option>
+                                <% }) %>
+                            </select>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label">Bắt đầu *</label>
+                            <input type="datetime-local" name="startAt" class="form-control" value="<%= toInputDateTime(promo.startAt) %>" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Kết thúc *</label>
+                            <input type="datetime-local" name="endAt" class="form-control" value="<%= toInputDateTime(promo.endAt) %>" required>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label">Trạng thái *</label>
+                            <select name="status" class="form-select" required>
+                                <option value="DRAFT" <%= promo.status === 'DRAFT' ? 'selected' : '' %>>Bản nháp</option>
+                                <option value="SCHEDULED" <%= promo.status === 'SCHEDULED' ? 'selected' : '' %>>Sắp diễn ra</option>
+                                <option value="ACTIVE" <%= promo.status === 'ACTIVE' ? 'selected' : '' %>>Đang hoạt động</option>
+                                <option value="ENDED" <%= promo.status === 'ENDED' ? 'selected' : '' %>>Đã kết thúc</option>
+                                <option value="CANCELLED" <%= promo.status === 'CANCELLED' ? 'selected' : '' %>>Đã hủy</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button>
+                    <button type="submit" class="btn btn-primary">Lưu thay đổi</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<% }) %>
+
+<script>
+(function () {
+    function toDateTimeLocalValue(date) {
+        const pad = function (n) { return String(n).padStart(2, '0'); };
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    }
+
+    function syncPromotionDates(form) {
+        const startInput = form.querySelector('input[name="startAt"]');
+        const endInput = form.querySelector('input[name="endAt"]');
+        if (!startInput || !endInput) return;
+
+        const now = new Date();
+        const minDateTime = toDateTimeLocalValue(now);
+        const startValue = startInput.value || '';
+        const endValue = endInput.value || '';
+
+        startInput.min = startValue && startValue < minDateTime ? startValue : minDateTime;
+        endInput.min = endValue && endValue < minDateTime ? endValue : minDateTime;
+
+        if (startInput.value) {
+            const nextMinEnd = startInput.value > endInput.min ? startInput.value : endInput.min;
+            endInput.min = nextMinEnd;
+            if (endInput.value && endInput.value < startInput.value) {
+                endInput.value = startInput.value;
+            }
+        }
+    }
+
+    function syncRouteScope(form) {
+        const scopeSelect = form.querySelector('.js-scope');
+        const routeWrap = form.querySelector('.js-route-wrap');
+        const routeSelect = form.querySelector('.js-route-select');
+        if (!scopeSelect || !routeWrap || !routeSelect) return;
+
+        const isSingle = scopeSelect.value === 'SINGLE_ROUTE';
+        routeWrap.classList.toggle('d-none', !isSingle);
+        routeSelect.required = isSingle;
+        if (!isSingle) routeSelect.value = '';
+    }
+
+    document.querySelectorAll('.promotion-form').forEach(function (form) {
+        const scopeSelect = form.querySelector('.js-scope');
+        const startInput = form.querySelector('input[name="startAt"]');
+        const endInput = form.querySelector('input[name="endAt"]');
+        if (scopeSelect) {
+            scopeSelect.addEventListener('change', function () {
+                syncRouteScope(form);
+            });
+        }
+        if (startInput) {
+            startInput.addEventListener('change', function () {
+                syncPromotionDates(form);
+            });
+        }
+        if (endInput) {
+            endInput.addEventListener('change', function () {
+                syncPromotionDates(form);
+            });
+        }
+        syncRouteScope(form);
+        syncPromotionDates(form);
+    });
+})();
+</script>

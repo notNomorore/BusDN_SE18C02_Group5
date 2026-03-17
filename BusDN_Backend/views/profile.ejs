@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hồ sơ cá nhân - BusDN</title>
+    <title>HÃ¡Â»â€œ sÃ†Â¡ cÃƒÂ¡ nhÃƒÂ¢n - BusDN</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -53,10 +53,6 @@
             padding-right: 40px;
         }
 
-        .wallet-balance-animate {
-            transition: transform .18s ease, opacity .18s ease;
-        }
-
         .feature-card {
             border: 1px solid #eef0f3;
             border-radius: 12px;
@@ -67,7 +63,8 @@
 </head>
 
 <body>
-    <%- include('partials/header') %>
+    <% const safeUser = (typeof user !== 'undefined' && user) ? user : {}; %>
+    <%- include('partials/header', { user: safeUser }) %>
 
         <div class="container my-5">
 
@@ -89,7 +86,7 @@
                                         style="background: linear-gradient(180deg, #ffffff 0%, #eef2f7 100%);">
 
                                         <div class="position-relative d-inline-block mb-3">
-                                            <img src="<%= user.avatar || 'https://via.placeholder.com/150' %>"
+                                            <img src="<%= safeUser.avatar || 'https://via.placeholder.com/150' %>"
                                                 class="rounded-circle border border-4 border-white shadow" width="120"
                                                 height="120" style="object-fit: cover;">
                                             <form action="/upload-avatar" method="POST" enctype="multipart/form-data"
@@ -104,36 +101,29 @@
                                             </form>
                                         </div>
                                         <h5 class="fw-bold mb-1">
-                                            <%= user.fullName %>
+                                            <%= safeUser.fullName || 'Nguoi dung' %>
                                         </h5>
                                         <p class="text-muted small mb-3">
-                                            <%= user.role || 'Hành khách' %>
+                                            <%= safeUser.role || 'Hanh khach' %>
                                         </p>
 
-                                        <!-- WALLET CARD -->
+                                        <!-- TICKET CARD -->
                                         <div class="card bg-primary text-white p-3 mb-3 text-start shadow-sm"
                                             style="background: #003366 !important;">
                                             <div class="d-flex justify-content-between align-items-center">
                                                 <div class="w-100">
-                                                    <small class="opacity-75">Số dư ví BusDN</small>
-                                                    <div class="fs-4 fw-bold wallet-balance-animate"
-                                                        id="walletBalanceText">
-                                                        <%= Number((user && user.walletBalance) ? user.walletBalance :
-                                                            0).toLocaleString("vi-VN") %> đ
-                                                    </div>
-
+                                                    <small class="opacity-75">Quan ly ve thang</small>
+                                                    <div class="fs-5 fw-bold">Xem danh sach ve da mua</div>
                                                     <div class="d-grid gap-2 mt-2">
-                                                        <a href="/passenger/wallet"
-                                                            class="btn btn-light btn-sm fw-bold">
-                                                            <i class="fa-solid fa-wallet me-1"></i> Xem ví của tôi
+                                                        <a href="/passenger/my-tickets" class="btn btn-light btn-sm fw-bold">
+                                                            <i class="fa-solid fa-ticket me-1"></i> Ve cua toi
                                                         </a>
-                                                        <a href="/passenger/wallet/deposit"
-                                                            class="btn btn-warning btn-sm fw-bold">
-                                                            <i class="fa-solid fa-plus me-1"></i> Nạp tiền vào ví
+                                                        <a href="/passenger/passes/monthly" class="btn btn-warning btn-sm fw-bold">
+                                                            <i class="fa-solid fa-credit-card me-1"></i> Mua ve thang
                                                         </a>
                                                     </div>
                                                 </div>
-                                                <i class="fa-solid fa-wallet fa-2x opacity-50 ms-3"></i>
+                                                <i class="fa-solid fa-ticket fa-2x opacity-50 ms-3"></i>
                                             </div>
                                         </div>
                                     </div>
@@ -146,35 +136,34 @@
                                             <li class="nav-item p-1">
                                                 <button class="nav-link active fw-bold" id="info-tab"
                                                     data-bs-toggle="pill" data-bs-target="#pills-info" type="button">
-                                                    <i class="fa-solid fa-user-pen me-2"></i> Thông tin
+                                                    <i class="fa-solid fa-user-pen me-2"></i> ThÃƒÂ´ng tin
                                                 </button>
                                             </li>
                                             <li class="nav-item p-1">
-                                                <button class="nav-link fw-bold text-dark" id="wallet-tab"
-                                                    data-bs-toggle="pill" data-bs-target="#pills-wallet" type="button">
-                                                    <i class="fa-solid fa-wallet me-2"></i> Ví / Vé tháng
-                                                </button>
+                                                <button class="nav-link fw-bold text-dark" id="tickets-tab"
+                                                    data-bs-toggle="pill" data-bs-target="#pills-tickets" type="button">
+                                                    <i class="fa-solid fa-ticket me-2"></i> Ve thang</button>
                                             </li>
                                             <li class="nav-item p-1">
                                                 <button class="nav-link fw-bold text-dark" id="security-tab"
                                                     data-bs-toggle="pill" data-bs-target="#pills-security"
                                                     type="button">
-                                                    <i class="fa-solid fa-shield-halved me-2"></i> Bảo mật
+                                                    <i class="fa-solid fa-shield-halved me-2"></i> BÃ¡ÂºÂ£o mÃ¡ÂºÂ­t
                                                 </button>
                                             </li>
                                         </ul>
 
                                         <div class="tab-content" id="pills-tabContent">
 
-                                            <!-- TAB THÔNG TIN -->
+                                            <!-- TAB THÃƒâ€NG TIN -->
                                             <div class="tab-pane fade show active" id="pills-info">
                                                 <form action="/edit-profile" method="POST">
                                                     <div class="mb-3">
-                                                        <label class="form-label fw-bold text-secondary">Họ và
-                                                            tên</label>
+                                                        <label class="form-label fw-bold text-secondary">HÃ¡Â»Â vÃƒÂ 
+                                                            tÃƒÂªn</label>
                                                         <input type="text" name="fullName"
                                                             class="form-control form-control-lg"
-                                                            value="<%= user.fullName %>">
+                                                            value="<%= safeUser.fullName || '' %>">
                                                     </div>
                                                     <div class="row">
                                                         <div class="col-md-6 mb-3">
@@ -182,7 +171,7 @@
                                                                 class="form-label fw-bold text-secondary">Email</label>
                                                             <div class="input-group">
                                                                 <input type="text" class="form-control bg-light"
-                                                                    value="<%= user.email %>" readonly>
+                                                                    value="<%= safeUser.email || '' %>" readonly>
                                                                 <span class="input-group-text bg-white text-success">
                                                                     <i class="fa-solid fa-circle-check"></i>
                                                                 </span>
@@ -191,47 +180,47 @@
 
                                                         <div class="col-md-6 mb-3">
                                                             <label class="form-label fw-bold text-secondary">
-                                                                Số điện thoại
-                                                                <% if (user.phone) { %>
+                                                                SÃ¡Â»â€˜ Ã„â€˜iÃ¡Â»â€¡n thoÃ¡ÂºÂ¡i
+                                                                <% if (safeUser.phone) { %>
                                                                     <span class="verified-badge">
-                                                                        <i class="fa-solid fa-circle-check"></i> Đã xác
-                                                                        thực
+                                                                        <i class="fa-solid fa-circle-check"></i> Ã„ÂÃƒÂ£ xÃƒÂ¡c
+                                                                        thÃ¡Â»Â±c
                                                                     </span>
                                                                     <% } else { %>
                                                                         <span class="unverified-badge">
                                                                             <i
                                                                                 class="fa-solid fa-circle-exclamation"></i>
-                                                                            Chưa xác thực
+                                                                            ChÃ†Â°a xÃƒÂ¡c thÃ¡Â»Â±c
                                                                         </span>
                                                                         <% } %>
                                                             </label>
                                                             <input type="text" name="phone" class="form-control"
-                                                                value="<%= user.phone || '' %>"
-                                                                placeholder="Nhập SĐT...">
+                                                                value="<%= safeUser.phone || '' %>"
+                                                                placeholder="NhÃ¡ÂºÂ­p SÃ„ÂT...">
                                                         </div>
                                                     </div>
 
                                                     <hr class="text-muted my-4">
                                                     <button type="submit"
                                                         class="btn btn-warning fw-bold px-4 py-2 w-100">
-                                                        Lưu thay đổi
+                                                        LÃ†Â°u thay Ã„â€˜Ã¡Â»â€¢i
                                                     </button>
                                                 </form>
                                             </div>
 
-                                            <!-- TAB VÍ/VÉ THÁNG -->
-                                            <div class="tab-pane fade" id="pills-wallet">
+                                            <!-- TAB VÃƒÂ/VÃƒâ€° THÃƒÂNG -->
+                                            <div class="tab-pane fade" id="pills-tickets">
                                                 <div class="row g-3">
                                                     <div class="col-md-6">
                                                         <div class="feature-card h-100">
 
                                                             <div class="text-muted small mb-3">
-                                                                Xem số dư ví hiện tại, lịch sử giao dịch và vé tháng đã
-                                                                mua.
+                                                                Xem sÃ¡Â»â€˜ dÃ†Â° vÃƒÂ­ hiÃ¡Â»â€¡n tÃ¡ÂºÂ¡i, lÃ¡Â»â€¹ch sÃ¡Â»Â­ giao dÃ¡Â»â€¹ch vÃƒÂ  vÃƒÂ© thÃƒÂ¡ng Ã„â€˜ÃƒÂ£
+                                                                Xem danh sach ve thang da mua, thoi han su dung va ma QR de xuat trinh khi di xe.
                                                             </div>
-                                                            <a href="/passenger/wallet"
+                                                            <a href="/passenger/my-tickets"
                                                                 class="btn btn-outline-primary w-100 fw-bold">
-                                                                Mở trang ví
+                                                                MÃ¡Â»Å¸ trang vÃƒÂ­
                                                             </a>
                                                         </div>
                                                     </div>
@@ -240,12 +229,12 @@
                                                         <div class="feature-card h-100">
 
                                                             <div class="text-muted small mb-3">
-                                                                Chọn tuyến, chọn tháng và thanh toán vé tháng bằng ví
+                                                                ChÃ¡Â»Ân tuyÃ¡ÂºÂ¿n, chÃ¡Â»Ân thÃƒÂ¡ng vÃƒÂ  thanh toÃƒÂ¡n vÃƒÂ© thÃƒÂ¡ng bÃ¡ÂºÂ±ng vÃƒÂ­
                                                                 BusDN.
                                                             </div>
                                                             <a href="/passenger/passes/monthly"
                                                                 class="btn btn-outline-success w-100 fw-bold">
-                                                                Mua vé tháng
+                                                                Mua vÃƒÂ© thÃƒÂ¡ng
                                                             </a>
                                                         </div>
                                                     </div>
@@ -254,12 +243,12 @@
                                                 </div>
                                             </div>
 
-                                            <!-- TAB BẢO MẬT -->
+                                            <!-- TAB BÃ¡ÂºÂ¢O MÃ¡ÂºÂ¬T -->
                                             <div class="tab-pane fade" id="pills-security">
                                                 <form action="/change-password" method="POST">
                                                     <div class="mb-3 position-relative">
-                                                        <label class="form-label fw-bold text-secondary">Mật khẩu hiện
-                                                            tại</label>
+                                                        <label class="form-label fw-bold text-secondary">MÃ¡ÂºÂ­t khÃ¡ÂºÂ©u hiÃ¡Â»â€¡n
+                                                            tÃ¡ÂºÂ¡i</label>
                                                         <input type="password" name="oldPassword" id="oldPass"
                                                             class="form-control" required>
                                                         <i class="fa-regular fa-eye password-toggle position-absolute top-50 end-0 translate-middle-y me-3 pt-4"
@@ -267,8 +256,8 @@
                                                     </div>
 
                                                     <div class="mb-3 position-relative">
-                                                        <label class="form-label fw-bold text-secondary">Mật khẩu
-                                                            mới</label>
+                                                        <label class="form-label fw-bold text-secondary">MÃ¡ÂºÂ­t khÃ¡ÂºÂ©u
+                                                            mÃ¡Â»â€ºi</label>
                                                         <input type="password" name="newPassword" id="newPass"
                                                             class="form-control" required>
                                                         <i class="fa-regular fa-eye password-toggle position-absolute top-50 end-0 translate-middle-y me-3 pt-4"
@@ -276,8 +265,8 @@
                                                     </div>
 
                                                     <div class="mb-4 position-relative">
-                                                        <label class="form-label fw-bold text-secondary">Xác nhận mật
-                                                            khẩu mới</label>
+                                                        <label class="form-label fw-bold text-secondary">XÃƒÂ¡c nhÃ¡ÂºÂ­n mÃ¡ÂºÂ­t
+                                                            khÃ¡ÂºÂ©u mÃ¡Â»â€ºi</label>
                                                         <input type="password" name="confirmPassword" id="confirmPass"
                                                             class="form-control" required>
                                                         <i class="fa-regular fa-eye password-toggle position-absolute top-50 end-0 translate-middle-y me-3 pt-4"
@@ -286,7 +275,7 @@
 
                                                     <button type="submit"
                                                         class="btn btn-danger fw-bold px-4 py-2 w-100">
-                                                        <i class="fa-solid fa-key me-2"></i> Xác nhận đổi mật khẩu
+                                                        <i class="fa-solid fa-key me-2"></i> XÃƒÂ¡c nhÃ¡ÂºÂ­n Ã„â€˜Ã¡Â»â€¢i mÃ¡ÂºÂ­t khÃ¡ÂºÂ©u
                                                     </button>
                                                 </form>
                                             </div>
@@ -315,49 +304,7 @@
             }
         </script>
 
-        <script>
-            (function () {
-                const walletEl = document.getElementById('walletBalanceText');
-                if (!walletEl) return;
-
-                let isFetching = false;
-
-                async function fetchWalletBalance() {
-                    if (isFetching) return;
-                    isFetching = true;
-                    try {
-                        const res = await fetch('/passenger/wallet/balance', {
-                            method: 'GET',
-                            headers: { 'Accept': 'application/json' },
-                            cache: 'no-store'
-                        });
-                        if (!res.ok) return;
-                        const data = await res.json();
-                        if (!data || !data.ok) return;
-
-                        walletEl.textContent = `${data.walletBalanceText} đ`;
-                        walletEl.style.transform = 'scale(1.03)';
-                        walletEl.style.opacity = '0.95';
-                        setTimeout(() => {
-                            walletEl.style.transform = 'scale(1)';
-                            walletEl.style.opacity = '1';
-                        }, 150);
-                    } catch (e) {
-                    } finally {
-                        isFetching = false;
-                    }
-                }
-
-                fetchWalletBalance();
-                const timer = setInterval(fetchWalletBalance, 5000);
-
-                document.addEventListener('visibilitychange', () => {
-                    if (!document.hidden) fetchWalletBalance();
-                });
-
-                window.addEventListener('beforeunload', () => clearInterval(timer));
-            })();
-        </script>
+        
 </body>
 
 </html>

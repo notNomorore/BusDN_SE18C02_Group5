@@ -1,7 +1,6 @@
 const express = require("express");
 const router = express.Router();
 
-const walletController = require("../controllers/walletController");
 const monthlyPassController = require("../controllers/monthlyPassController");
 
 function requirePassenger(req, res, next) {
@@ -10,34 +9,16 @@ function requirePassenger(req, res, next) {
     next();
 }
 
-/* =========================
-   UC14 - View Wallet Balance
-========================= */
-router.get("/wallet", requirePassenger, walletController.getWalletPage);
-router.get("/wallet/balance", requirePassenger, walletController.getWalletBalance);
-
-/* =========================
-   UC13 - Deposit Wallet (VNPAY)
-========================= */
-router.get("/wallet/deposit", requirePassenger, walletController.getDepositPage);
-router.post("/wallet/deposit", requirePassenger, walletController.postDeposit);
-
-// Return URL (trình duyệt redirect về)
-router.get("/wallet/vnpay-return", walletController.vnpayReturn);
-
-// IPN URL (VNPAY gọi server-server, không cần login)
-router.get("/wallet/vnpay-ipn", walletController.vnpayIpn);
-
-/* =========================
-   UC15 - Purchase Monthly Pass
-========================= */
-// URL gốc
+/* Monthly pass purchase */
 router.get("/passes/monthly", requirePassenger, monthlyPassController.getMonthlyPassPage);
-
-// ✅ Alias để menu "Vé của tôi" dùng URL đẹp
-router.get("/monthly-pass", requirePassenger, monthlyPassController.getMonthlyPassPage);
-
-// Mua vé tháng
+router.get("/passes/monthly/promo-preview", requirePassenger, monthlyPassController.previewPromotion);
 router.post("/passes/monthly/purchase", requirePassenger, monthlyPassController.purchaseMonthlyPass);
+router.get("/passes/monthly/vnpay-return", monthlyPassController.vnpayReturnMonthlyPass);
+router.get("/passes/monthly/momo-return", monthlyPassController.momoReturnMonthlyPass);
+
+/* My tickets */
+router.get("/monthly-pass", requirePassenger, monthlyPassController.getMyTicketsPage);
+router.get("/my-tickets", requirePassenger, monthlyPassController.getMyTicketsPage);
+router.get("/my-tickets/:passId/qr.png", requirePassenger, monthlyPassController.getMyTicketQrImage);
 
 module.exports = router;

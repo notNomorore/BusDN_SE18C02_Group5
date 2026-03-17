@@ -1,12 +1,10 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="vi">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>
-        <%= title %> | BusDN Admin
-    </title>
+    <title><%= title %> | BusDN Admin</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
@@ -46,8 +44,7 @@
 <body>
     <div class="d-flex">
         <div class="sidebar d-flex flex-column flex-shrink-0 p-3" style="width: 250px;">
-            <a href="/admin/dashboard"
-                class="d-flex align-items-center mb-3 mb-md-0 me-md-auto text-white text-decoration-none">
+            <a href="/admin/dashboard" class="d-flex align-items-center mb-3 mb-md-0 me-md-auto text-white text-decoration-none">
                 <span class="fs-4 fw-bold"><i class="fas fa-bus"></i> BusDN Admin</span>
             </a>
             <hr>
@@ -59,29 +56,24 @@
                 </li>
                 <li>
                     <a href="/admin/routes" class="<%= path === 'routes' ? 'active' : '' %>">
-                        <i class="fas fa-map-marked-alt me-2"></i> Quản lý Tuyến
+                        <i class="fas fa-map-marked-alt me-2"></i> Quản lý tuyến
                     </a>
                 </li>
                 <li>
                     <a href="/admin/schedules" class="<%= path === 'schedules' ? 'active' : '' %>">
-                        <i class="fas fa-calendar-alt me-2"></i> Điều phối Lịch
+                        <i class="fas fa-calendar-alt me-2"></i> Điều phối lịch
                     </a>
                 </li>
                 <li>
-                    <a href="/admin/staff"
-                        class="<%= ['staff-list','staff-create','priority-profiles'].includes(path) ? 'active' : '' %>">
+                    <a href="/admin/staff" class="<%= ['staff-list','staff-create','priority-profiles'].includes(path) ? 'active' : '' %>">
                         <i class="fas fa-users-cog me-2"></i> Nhân sự
                     </a>
                     <% if (['staff-list','staff-create','priority-profiles'].includes(path)) { %>
-                        <ul class="nav flex-column ms-3" style="font-size:0.88em;">
-                            <li><a href="/admin/staff" class="<%= path === 'staff-list' ? 'active' : '' %>"
-                                    style="padding:5px 10px;">
-                                    <i class="fas fa-list me-1"></i> Danh sách</a></li>
-                            <li><a href="/admin/staff/create" class="<%= path === 'staff-create' ? 'active' : '' %>"
-                                    style="padding:5px 10px;">
-                                    <i class="fas fa-user-plus me-1"></i> Tạo tài khoản</a></li>
-                        </ul>
-                        <% } %>
+                    <ul class="nav flex-column ms-3" style="font-size:0.88em;">
+                        <li><a href="/admin/staff" class="<%= path === 'staff-list' ? 'active' : '' %>" style="padding:5px 10px;"><i class="fas fa-list me-1"></i> Danh sách</a></li>
+                        <li><a href="/admin/staff/create" class="<%= path === 'staff-create' ? 'active' : '' %>" style="padding:5px 10px;"><i class="fas fa-user-plus me-1"></i> Tạo tài khoản</a></li>
+                    </ul>
+                    <% } %>
                 </li>
                 <li>
                     <a href="/admin/priority-profiles" class="<%= path === 'priority-profiles' ? 'active' : '' %>">
@@ -89,27 +81,31 @@
                     </a>
                 </li>
                 <li>
+                    <a href="/admin/promotions" class="<%= path === 'promotions' ? 'active' : '' %>">
+                        <i class="fas fa-tags me-2"></i> Khuyến mãi
+                    </a>
+                </li>
+                <li>
+                    <a href="/admin/fares" class="<%= path === 'fares' ? 'active' : '' %>">
+                        <i class="fas fa-money-check-dollar me-2"></i> Bảng giá vé
+                    </a>
+                </li>
+                <li>
                     <a href="#" class="<%= path === 'reports' ? 'active' : '' %>">
-                        <i class="fas fa-chart-line me-2"></i> Báo cáo Doanh thu
+                        <i class="fas fa-chart-line me-2"></i> Báo cáo doanh thu
                     </a>
                 </li>
             </ul>
             <hr>
             <div class="dropdown">
-                <a href="#" class="d-flex align-items-center text-white text-decoration-none dropdown-toggle"
-                    id="dropdownUser1" data-bs-toggle="dropdown" aria-expanded="false">
-                    <img src="<%= user.avatar || '/images/default.png' %>" alt="" width="32" height="32"
-                        class="rounded-circle me-2 border border-white">
-                    <strong>
-                        <%= user.fullName || 'Admin' %>
-                    </strong>
+                <a href="#" class="d-flex align-items-center text-white text-decoration-none dropdown-toggle" id="dropdownUser1" data-bs-toggle="dropdown" aria-expanded="false">
+                    <img src="<%= user.avatar || '/images/default.png' %>" alt="" width="32" height="32" class="rounded-circle me-2 border border-white">
+                    <strong><%= user.fullName || 'Admin' %></strong>
                 </a>
                 <ul class="dropdown-menu dropdown-menu-dark text-small shadow" aria-labelledby="dropdownUser1">
                     <li><a class="dropdown-item" href="/admin/profile">Hồ sơ cá nhân</a></li>
                     <li><a class="dropdown-item" href="/admin/profile#password-section">Đổi mật khẩu</a></li>
-                    <li>
-                        <hr class="dropdown-divider">
-                    </li>
+                    <li><hr class="dropdown-divider"></li>
                     <li><a class="dropdown-item" href="/logout">Đăng xuất</a></li>
                 </ul>
             </div>

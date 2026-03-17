@@ -11,4 +11,14 @@ const isAdmin = (req, res, next) => {
     next();
 };
 
-module.exports = { isAdmin };
+const isFinanceOrAdmin = (req, res, next) => {
+    if (!req.session.userId) {
+        return res.redirect('/login');
+    }
+    if (!['ADMIN', 'FINANCE'].includes(req.session.role)) {
+        return res.redirect('/profile');
+    }
+    next();
+};
+
+module.exports = { isAdmin, isFinanceOrAdmin };

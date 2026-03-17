@@ -204,9 +204,17 @@
 <script>
     // Giữ nguyên phần script của bạn, chỉ thêm logic hiển thị flex cho modal
     let currentProfileId = null;
+    const expiryDateInput = document.getElementById('expiryDate');
+    const todayDateString = new Date().toISOString().slice(0, 10);
+    if (expiryDateInput) expiryDateInput.min = todayDateString;
 
     function approveProfile(profileId) {
         currentProfileId = profileId;
+        if (expiryDateInput && !expiryDateInput.value) {
+            const defaultExpiry = new Date();
+            defaultExpiry.setFullYear(defaultExpiry.getFullYear() + 2);
+            expiryDateInput.value = defaultExpiry.toISOString().slice(0, 10);
+        }
         document.getElementById('approveModal').style.display = 'flex';
     }
     function closeApproveModal() { document.getElementById('approveModal').style.display = 'none'; }
