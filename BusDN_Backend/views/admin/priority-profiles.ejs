@@ -121,6 +121,9 @@
 
 <script>
     let currentProfileId = null;
+    const expiryDateInput = document.getElementById('expiryDate');
+    const todayDateString = new Date().toISOString().slice(0, 10);
+    if (expiryDateInput) expiryDateInput.min = todayDateString;
 
     function getMinExpiryDateString() {
         const d = new Date();

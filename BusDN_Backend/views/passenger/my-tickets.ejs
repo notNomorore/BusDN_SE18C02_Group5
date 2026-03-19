@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>V&#233; c&#7911;a t&#244;i - BusDN</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background: #f4f6f9; }
+        .page-card { border: 0; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,.04); }
+        .pass-code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+        #ticketQrCode img { margin: 0 auto; display: block; width: 180px; height: 180px; }
+    </style>
+</head>
+<body>
+    <%- include('../partials/header') %>
+
+    <div class="container my-4 my-lg-5">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <h2 class="fw-bold mb-1">V&#233; c&#7911;a t&#244;i</h2>
+                <div class="text-muted">Danh s&#225;ch v&#233; th&#225;ng &#273;&#227; mua v&#224; xem chi ti&#7871;t b&#7857;ng QR</div>
+            </div>
+            <a href="/passenger/passes/monthly" class="btn btn-primary fw-bold">
+                <i class="fa-solid fa-credit-card me-2"></i> Mua v&#233; th&#225;ng
+            </a>
+        </div>
+
+        <% if (error) { %>
+            <div class="alert alert-danger"><%= error %></div>
+        <% } %>
+        <% if (success) { %>
+            <div class="alert alert-success"><%= success %></div>
+        <% } %>
+
+        <div class="card page-card">
+            <div class="card-body">
+                <% if (!myPasses || myPasses.length === 0) { %>
+                    <div class="text-center py-5 text-muted">
+                        <i class="fa-solid fa-ticket fa-2x mb-3 opacity-50"></i>
+                        <div>B&#7841;n ch&#432;a mua v&#233; th&#225;ng n&#224;o.</div>
+                    </div>
+                <% } else { %>
+                    <div class="table-responsive">
+                        <table class="table align-middle">
+                            <thead>
+                                <tr>
+                                    <th>M&#227; th&#7867;</th>
+                                    <th>Tuy&#7871;n</th>
+                                    <th>K&#7923; v&#233;</th>
+                                    <th>Gi&#225; &#273;&#227; tr&#7843;</th>
+                                    <th>Tr&#7841;ng th&#225;i</th>
+                                    <th class="text-end">Chi ti&#7871;t</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <% myPasses.forEach(pass => { %>
+                                    <tr>
+                                        <td class="pass-code"><%= pass.passCode %></td>
+                                        <td><%= pass.displayRouteNumber ? `${pass.displayRouteNumber} - ${pass.displayRouteName}` : pass.displayRouteName %></td>
+                                        <td>
+                                            <div><%= String(pass.month).padStart(2, '0') %>/<%= pass.year %></div>
+                                            <small class="text-muted">
+                                                <%= pass.validFrom ? new Date(pass.validFrom).toLocaleDateString('vi-VN') : '-' %> -
+                                                <%= pass.validTo ? new Date(pass.validTo).toLocaleDateString('vi-VN') : '-' %>
+                                            </small>
+                                        </td>
+                                        <td><%= Number(pass.pricePaid || 0).toLocaleString('vi-VN') %> &#273;</td>
+                                        <td>
+                                            <span class="badge <%= pass.status === 'ACTIVE' ? 'text-bg-success' : (pass.status === 'EXPIRED' ? 'text-bg-secondary' : 'text-bg-danger') %>">
+                                                <%= pass.status %>
+                                            </span>
+                                        </td>
+                                        <td class="text-end">
+                                            <button
+                                                type="button"
+                                                class="btn btn-outline-primary btn-sm view-ticket-btn"
+                                                data-bs-toggle="modal"
+                                                data-bs-target="#ticketDetailModal"
+                                                data-ticket-id="<%= String(pass._id) %>">
+                                                <i class="fa-solid fa-qrcode me-1"></i> Xem chi ti&#7871;t
+                                            </button>
+                                        </td>
+                                    </tr>
+                                <% }) %>
+                            </tbody>
+                        </table>
+                    </div>
+                <% } %>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="ticketDetailModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Chi ti&#7871;t v&#233; th&#225;ng</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="ticketQrCode" class="mb-3"></div>
+                    <div id="qrFallback" class="small text-danger text-center mb-3 d-none">Kh&#244;ng t&#7841;o &#273;&#432;&#7907;c m&#227; QR. Vui l&#242;ng th&#7917; t&#7843;i l&#7841;i trang.</div>
+                    <div class="small text-muted text-center mb-3">Qu&#233;t QR &#273;&#7875; xem th&#244;ng tin v&#233;</div>
+
+                    <div class="small">
+                        <div><strong>M&#227; th&#7867;:</strong> <span id="detailPassCode"></span></div>
+                        <div><strong>Lo&#7841;i v&#233;:</strong> <span id="detailPassType"></span></div>
+                        <div><strong>Tuy&#7871;n:</strong> <span id="detailRoute"></span></div>
+                        <div><strong>K&#7923; v&#233;:</strong> <span id="detailPeriod"></span></div>
+                        <div><strong>Hi&#7879;u l&#7921;c:</strong> <span id="detailValidity"></span></div>
+                        <div><strong>Gi&#225; &#273;&#227; tr&#7843;:</strong> <span id="detailPrice"></span></div>
+                        <div><strong>Tr&#7841;ng th&#225;i:</strong> <span id="detailStatus"></span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        (function () {
+            const tickets = <%- JSON.stringify((myPasses || []).map((p) => ({
+                id: String(p._id),
+                passCode: p.passCode,
+                passType: p.displayPassType,
+                route: p.displayRouteNumber ? `${p.displayRouteNumber} - ${p.displayRouteName}` : p.displayRouteName,
+                month: p.month,
+                year: p.year,
+                validFrom: p.validFrom,
+                validTo: p.validTo,
+                pricePaid: p.pricePaid,
+                status: p.status,
+                qrCodeDataUrl: p.qrCodeDataUrl || ""
+            }))) %>;
+
+            const ticketMap = new Map(tickets.map((t) => [t.id, t]));
+
+            function formatDate(v) {
+                if (!v) return '-';
+                return new Date(v).toLocaleDateString('vi-VN');
+            }
+
+            function clearTicket() {
+                document.getElementById('detailPassCode').textContent = '-';
+                document.getElementById('detailPassType').textContent = '-';
+                document.getElementById('detailRoute').textContent = '-';
+                document.getElementById('detailPeriod').textContent = '-';
+                document.getElementById('detailValidity').textContent = '-';
+                document.getElementById('detailPrice').textContent = '-';
+                document.getElementById('detailStatus').textContent = '-';
+                document.getElementById('ticketQrCode').innerHTML = '';
+                document.getElementById('qrFallback').classList.add('d-none');
+            }
+
+            function renderTicket(ticket) {
+                document.getElementById('detailPassCode').textContent = ticket.passCode || '-';
+                document.getElementById('detailPassType').textContent = ticket.passType || '-';
+                document.getElementById('detailRoute').textContent = ticket.route || '-';
+                document.getElementById('detailPeriod').textContent = `${String(ticket.month).padStart(2, '0')}/${ticket.year}`;
+                document.getElementById('detailValidity').textContent = `${formatDate(ticket.validFrom)} - ${formatDate(ticket.validTo)}`;
+                document.getElementById('detailPrice').textContent = `${Number(ticket.pricePaid || 0).toLocaleString('vi-VN')} d`;
+                document.getElementById('detailStatus').textContent = ticket.status || '-';
+
+                const qrContainer = document.getElementById('ticketQrCode');
+                const qrFallback = document.getElementById('qrFallback');
+                qrContainer.innerHTML = '';
+                qrFallback.classList.add('d-none');
+
+                try {
+                    if (!ticket.qrCodeDataUrl || !String(ticket.qrCodeDataUrl).startsWith('data:image/')) {
+                        throw new Error('Missing QR data URL');
+                    }
+
+                    const qrImg = document.createElement('img');
+                    qrImg.src = ticket.qrCodeDataUrl;
+                    qrImg.alt = `QR ve ${ticket.passCode || ''}`.trim();
+                    qrImg.addEventListener('error', function () {
+                        qrContainer.innerHTML = '';
+                        qrFallback.classList.remove('d-none');
+                    }, { once: true });
+                    qrContainer.appendChild(qrImg);
+                } catch (e) {
+                    qrFallback.classList.remove('d-none');
+                }
+            }
+
+            const modalEl = document.getElementById('ticketDetailModal');
+            if (modalEl) {
+                modalEl.addEventListener('show.bs.modal', function (event) {
+                    const triggerBtn = event.relatedTarget;
+                    const ticketId = String(triggerBtn?.getAttribute('data-ticket-id') || '');
+                    const ticket = ticketMap.get(ticketId);
+                    if (!ticket) {
+                        clearTicket();
+                        return;
+                    }
+                    renderTicket(ticket);
+                });
+            }
+        })();
+    </script>
+</body>
+</html>

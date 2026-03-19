@@ -299,7 +299,7 @@ const PromotionSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 PromotionSchema.index({ status: 1, startAt: 1, endAt: 1 });
-// PromotionSchema.index({ code: 1 }, { unique: true });
+PromotionSchema.index({ code: 1 }, { unique: true });
 
 const FareTierSchema = new mongoose.Schema({
     maxDistanceKm: { type: Number, default: null },

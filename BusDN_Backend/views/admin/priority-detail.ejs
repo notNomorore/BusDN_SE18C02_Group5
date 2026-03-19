@@ -497,6 +497,8 @@
 
 <script>
     const profileId = '<%= profile._id %>';
+    const todayDateString = new Date().toISOString().slice(0, 10);
+    document.getElementById('expiryDate').min = todayDateString;
 
     // Image Modal
     function openModal(src) {
@@ -517,12 +519,11 @@
 
     // Approve Modal
     function approveProfile() {
-        const minDate = '<%= minExpiryDate || "" %>';
+        const tomorrow = new Date();
+        tomorrow.setFullYear(tomorrow.getFullYear() + 2);
         const expiryInput = document.getElementById('expiryDate');
-        if (minDate) {
-            expiryInput.min = minDate;
-            expiryInput.value = minDate;
-        }
+        expiryInput.min = todayDateString;
+        expiryInput.valueAsDate = tomorrow;
         document.getElementById('approveModal').style.display = 'flex';
     }
 
@@ -534,6 +535,10 @@
         const expiryDate = document.getElementById('expiryDate').value;
         if (!expiryDate) {
             Swal.fire({ icon: 'warning', title: 'Missing data', text: 'Please select an expiry date' });
+            return;
+        }
+        if (expiryDate < todayDateString) {
+            alert('Expiry date cannot be in the past');
             return;
         }
 

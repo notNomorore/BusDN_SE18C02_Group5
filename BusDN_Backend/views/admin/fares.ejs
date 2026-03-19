@@ -1,0 +1,162 @@
+<%
+  const m = matrix || {};
+  const monthly = m.monthly || {};
+  const singleRide = m.singleRide || {};
+  const freeRules = m.freeRideRules || {};
+  const previewRoutes = Array.isArray(routeFarePreview) ? routeFarePreview : [];
+%>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1">Cấu hình bảng giá vé</h2>
+        <div class="text-muted small">
+            Nguồn dữ liệu: <span class="badge <%= matrixSource === 'DB' ? 'bg-success' : 'bg-warning text-dark' %>"><%= matrixSource %></span>
+        </div>
+    </div>
+</div>
+
+<% if (success) { %>
+  <div class="alert alert-success"><%= success %></div>
+<% } %>
+<% if (error) { %>
+  <div class="alert alert-danger"><%= error %></div>
+<% } %>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-body">
+        <form method="POST" action="/admin/fares/update">
+            <h5 class="mb-3">1) Vé lượt (fare matrix theo khoảng cách)</h5>
+            <div class="row g-3 mb-4">
+                <div class="col-md-4">
+                    <label class="form-label">Giá cơ bản (đ)</label>
+                    <input
+                        type="number"
+                        class="form-control"
+                        min="0"
+                        step="1000"
+                        name="singleRideBasePrice"
+                        value="<%= Number(singleRide.basePrice || 0) %>"
+                        required
+                    >
+                </div>
+                <div class="col-md-8">
+                    <label class="form-label">Bậc giá theo khoảng cách</label>
+                    <textarea class="form-control" rows="5" name="tiersText" required><%= tiersText || '' %></textarea>
+                    <div class="form-text">
+                        Mỗi dòng: `max_km:gia`. Dùng `INF` cho bậc cuối. Ví dụ: `5:7000`, `10:10000`, `INF:20000`.
+                    </div>
+                </div>
+            </div>
+
+            <h5 class="mb-3">2) Vé tháng</h5>
+            <div class="row g-3 mb-4">
+                <div class="col-md-6">
+                    <label class="form-label">Giá vé liên tuyến (đ)</label>
+                    <input
+                        type="number"
+                        class="form-control"
+                        min="0"
+                        step="1000"
+                        name="interRoutePrice"
+                        value="<%= Number(monthly.interRoutePrice || 0) %>"
+                        required
+                    >
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Giá vé đơn tuyến mặc định (đ)</label>
+                    <input
+                        type="number"
+                        class="form-control"
+                        min="0"
+                        step="1000"
+                        name="singleRouteDefaultPrice"
+                        value="<%= Number(monthly.singleRouteDefaultPrice || 0) %>"
+                        required
+                    >
+                    <div class="form-text">Được dùng khi tuyến không có giá vé tháng riêng.</div>
+                </div>
+            </div>
+
+            <h5 class="mb-3">3) Quy tắc miễn phí vé lượt</h5>
+            <div class="row g-3">
+                <div class="col-12">
+                    <div class="form-check form-switch">
+                        <input
+                            class="form-check-input"
+                            type="checkbox"
+                            id="freeRideEnabled"
+                            name="freeRideEnabled"
+                            <%= freeRules.enabled ? 'checked' : '' %>
+                        >
+                        <label class="form-check-label" for="freeRideEnabled">Bật miễn phí vé lượt theo quy tắc</label>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Miễn phí nếu tuổi nhỏ hơn</label>
+                    <input
+                        type="number"
+                        class="form-control"
+                        min="0"
+                        max="120"
+                        name="freeRideUnderAge"
+                        value="<%= Number(freeRules.underAge ?? 6) %>"
+                    >
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Miễn phí nếu tuổi lớn hơn hoặc bằng</label>
+                    <input
+                        type="number"
+                        class="form-control"
+                        min="0"
+                        max="120"
+                        name="freeRideOverAge"
+                        value="<%= Number(freeRules.overAge ?? 80) %>"
+                    >
+                </div>
+                <div class="col-12">
+                    <label class="form-label">Ghi chú quy tắc miễn phí</label>
+                    <textarea class="form-control" name="freeRideNote" rows="2"><%= freeRules.note || '' %></textarea>
+                </div>
+            </div>
+
+            <div class="mt-4 d-flex justify-content-end">
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save me-1"></i> Lưu cấu hình
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-header bg-white fw-semibold">4) Xem nhanh tác động lên tuyến đang hoạt động</div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead>
+                    <tr>
+                        <th>Tuyến</th>
+                        <th>Giá vé tháng theo tuyến</th>
+                        <th>Giá vé tháng hiệu lực</th>
+                        <th>Vé lượt ước tính theo cự ly</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% if (!previewRoutes.length) { %>
+                        <tr>
+                            <td colspan="4" class="text-muted text-center py-3">Không có tuyến hoạt động.</td>
+                        </tr>
+                    <% } %>
+                    <% previewRoutes.forEach((r) => { %>
+                        <tr>
+                            <td><strong><%= r.routeNumber %></strong> - <%= r.name %></td>
+                            <td><%= Number(r.routeMonthlyPassPrice || 0).toLocaleString('vi-VN') %> đ</td>
+                            <td><strong><%= Number(r.effectiveMonthlyPrice || 0).toLocaleString('vi-VN') %> đ</strong></td>
+                            <td><%= Number(r.singleRideEstimatedFare || 0).toLocaleString('vi-VN') %> đ</td>
+                        </tr>
+                    <% }) %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
