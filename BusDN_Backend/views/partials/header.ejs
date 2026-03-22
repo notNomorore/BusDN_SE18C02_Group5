@@ -1,11 +1,4 @@
-<!DOCTYPE html>
-<html lang="vi">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BusDN - Hệ thống vé xe buýt</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<header class="main-header">
     <style>
         .main-header {
             position: sticky;
@@ -44,22 +37,41 @@
 
             <div class="collapse navbar-collapse" id="mainNav">
                 <ul class="navbar-nav mx-auto">
-                    <li class="nav-item"><a class="nav-link text-white mx-2" href="/home">Trang chủ</a></li>
-                    <li class="nav-item"><a class="nav-link text-white mx-2" href="/route-lookup">Tra cứu tuyến</a></li>
-                    <li class="nav-item"><a class="nav-link text-white mx-2" href="#">Tin tức</a></li>
+                    <li class="nav-item"><a class="nav-link text-white mx-2" href="/home">Trang ch&#7911;</a></li>
+                    <li class="nav-item"><a class="nav-link text-white mx-2" href="/route-lookup">Tra c&#7913;u tuy&#7871;n</a></li>
+                    <li class="nav-item"><a class="nav-link text-white mx-2" href="#">Tin t&#7913;c</a></li>
+                    <% if (typeof user !== 'undefined' && user) { %>
+                        <li class="nav-item"><a class="nav-link text-white mx-2" href="/passenger/my-tickets">V&#233; c&#7911;a t&#244;i</a></li>
+                    <% } %>
                 </ul>
 
-                <% const currentUser = (typeof locals !== 'undefined' && locals.user) ? locals.user : null; %>
-                <% if (!currentUser) { %>
-                    <div class="d-flex align-items-center gap-2">
-                        <a href="/login" class="btn btn-outline-clean btn-sm">Login</a>
-                        <a href="/register" class="btn btn-outline-clean btn-sm">Register</a>
+                <% if (typeof user !== 'undefined' && user) { %>
+                <div class="d-flex align-items-center gap-2 ms-lg-3 flex-wrap flex-lg-nowrap">
+                    <div class="dropdown">
+                        <a href="#" id="userMenu" data-bs-toggle="dropdown" aria-expanded="false"
+                            class="dropdown-toggle text-decoration-none d-flex align-items-center" style="gap:10px; padding:4px 12px 4px 4px; border-radius:999px; background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); color:#fff !important;">
+
+                            <img src="<%= user.avatar ? user.avatar : 'https://via.placeholder.com/40x40?text=U' %>"
+                                 alt="Avatar" width="38" height="38" style="object-fit:cover; border-radius:50%; border:2px solid #ffd34d;">
+
+                            <span class="fw-bold d-none d-md-inline" style="max-width:120px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                <%= user.fullName %>
+                            </span>
+                        </a>
+
+                        <ul class="dropdown-menu dropdown-menu-end shadow-lg border-0" style="width:260px; border-radius:14px; padding:8px; margin-top:10px;">
+                            <li><a class="dropdown-item py-2" href="/profile"><i class="fa-solid fa-user me-2 text-primary"></i>H&#7891; s&#417; c&#225; nh&#226;n</a></li>
+                            <li><a class="dropdown-item py-2" href="/priority/register"><i class="fa-solid fa-id-card me-2 text-success"></i>&#272;&#259;ng k&#253; &#432;u ti&#234;n</a></li>
+                            <li><a class="dropdown-item py-2" href="/passenger/my-tickets"><i class="fa-solid fa-ticket me-2 text-warning"></i>V&#233; c&#7911;a t&#244;i</a></li>
+                            <li><a class="dropdown-item py-2" href="/passenger/passes/monthly"><i class="fa-solid fa-credit-card me-2 text-info"></i>Mua v&#233; th&#225;ng</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item text-danger py-2" href="/logout"><i class="fa-solid fa-right-from-bracket me-2"></i>&#272;&#259;ng xu&#7845;t</a></li>
+                        </ul>
                     </div>
                 <% } else { %>
                     <div class="d-flex align-items-center gap-2">
-                        <a href="/admin/dashboard" class="btn btn-outline-clean btn-sm">Dashboard</a>
-                        <a href="/profile" class="btn btn-outline-clean btn-sm">Profile</a>
-                        <a href="/logout" class="btn btn-outline-clean btn-sm">Logout</a>
+                        <a href="/login" class="btn btn-outline-light btn-sm px-3">&#272;&#259;ng nh&#7853;p</a>
+                        <a href="/register" class="btn btn-warning btn-sm fw-bold px-3">&#272;&#259;ng k&#253;</a>
                     </div>
                 <% } %>
             </div>

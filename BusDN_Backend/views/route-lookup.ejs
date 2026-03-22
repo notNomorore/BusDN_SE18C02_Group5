@@ -738,6 +738,14 @@
                             <span class="info-value" id="infoOpTime">---</span>
                         </div>
                         <div class="info-item">
+                            <span class="info-label">Vé lượt ước tính:</span>
+                            <span class="info-value" id="infoSingleRideFare">---</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Vé tháng hiệu lực:</span>
+                            <span class="info-value" id="infoMonthlyFare">---</span>
+                        </div>
+                        <div class="info-item">
                             <span class="info-label">Hướng đi:</span>
                             <span class="info-value" id="infoDirection">---</span>
                         </div>
@@ -826,10 +834,11 @@
 
                     let html = '';
                     routes.forEach(route => {
+                        const singleFare = Number(route?.fareInfo?.singleRideEstimatedFare || 0);
                         html += `
                             <div class="route-item" onclick="selectRoute('${route._id}')">
                                 <div class="route-number">${route.routeNumber}</div>
-                                <div class="route-name">${route.name}</div>
+                                <div class="route-name">${route.name} · Vé lượt ~ ${singleFare.toLocaleString('vi-VN')} đ</div>
                             </div>
                         `;
                     });
@@ -872,6 +881,10 @@
             document.getElementById('infoDistance').textContent = currentRoute.distance || '---';
             document.getElementById('infoOpTime').textContent =
                 `${currentRoute.operationTime.start} - ${currentRoute.operationTime.end}`;
+            document.getElementById('infoSingleRideFare').textContent =
+                `${Number(currentRoute?.fareInfo?.singleRideEstimatedFare || 0).toLocaleString('vi-VN')} đ`;
+            document.getElementById('infoMonthlyFare').textContent =
+                `${Number(currentRoute?.fareInfo?.monthlyPassEffectivePrice || 0).toLocaleString('vi-VN')} đ`;
             document.getElementById('infoRouteName').textContent = currentRoute.name;
             document.getElementById('infoDistanceQuick').textContent = currentRoute.distance || '---';
 

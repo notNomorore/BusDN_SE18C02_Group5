@@ -4,6 +4,11 @@
  */
 
 const { Route, Stop } = require('../models/models');
+const {
+    getFareMatrix,
+    estimateSingleRideFare,
+    resolveMonthlyPassBasePrice
+} = require('../services/fareMatrixService');
 
 /**
  * Get all routes with optional search filter
@@ -15,9 +20,10 @@ const getAllRoutes = async (req, res) => {
         const searchQuery = req.query.search || '';
 
         // Build search filter for route number and name
-        let filter = {};
+        let filter = { status: 'ACTIVE' };
         if (searchQuery) {
             filter = {
+                status: 'ACTIVE',
                 $or: [
                     { routeNumber: { $regex: searchQuery, $options: 'i' } },
                     { name: { $regex: searchQuery, $options: 'i' } }
@@ -25,15 +31,31 @@ const getAllRoutes = async (req, res) => {
             };
         }
 
-        const routes = await Route.find(filter)
-            .select('_id routeNumber name distance operationTime')
-            .limit(50)
-            .lean();
+        const [routes, fareRes] = await Promise.all([
+            Route.find(filter)
+                .select('_id routeNumber name distance operationTime monthlyPassPrice')
+                .limit(50)
+                .lean(),
+            getFareMatrix()
+        ]);
+
+        const matrix = fareRes.matrix;
+        const mapped = routes.map(route => ({
+            ...route,
+            fareInfo: {
+                singleRideEstimatedFare: estimateSingleRideFare(Number(route.distance || 0), matrix),
+                monthlyPassEffectivePrice: resolveMonthlyPassBasePrice(
+                    'SINGLE_ROUTE',
+                    Number(route.monthlyPassPrice || 0),
+                    matrix
+                )
+            }
+        }));
 
         res.json({
             success: true,
             data: {
-                routes: routes
+                routes: mapped
             }
         });
     } catch (error) {
@@ -56,20 +78,33 @@ const getRouteDetail = async (req, res) => {
         const { routeId } = req.params;
 
         // Fetch route with populated stop details
-        const route = await Route.findById(routeId)
-            .populate({
-                path: 'stops.stopId',
-                model: 'Stop',
-                select: 'name address lat lng isTerminal location'
-            })
-            .lean();
+        const [route, fareRes] = await Promise.all([
+            Route.findById(routeId)
+                .populate({
+                    path: 'stops.stopId',
+                    model: 'Stop',
+                    select: 'name address lat lng isTerminal location'
+                })
+                .lean(),
+            getFareMatrix()
+        ]);
 
-        if (!route) {
+        if (!route || route.status !== 'ACTIVE') {
             return res.status(404).json({
                 success: false,
                 message: 'Tuyến xe không tồn tại'
             });
         }
+
+        const matrix = fareRes.matrix;
+        route.fareInfo = {
+            singleRideEstimatedFare: estimateSingleRideFare(Number(route.distance || 0), matrix),
+            monthlyPassEffectivePrice: resolveMonthlyPassBasePrice(
+                'SINGLE_ROUTE',
+                Number(route.monthlyPassPrice || 0),
+                matrix
+            )
+        };
 
         // Transform stops data to ensure GeoJSON format compatibility
         if (route.stops && Array.isArray(route.stops)) {
@@ -114,7 +149,7 @@ const getRouteGeoJSON = async (req, res) => {
             .populate('stops.stopId')
             .lean();
 
-        if (!route) {
+        if (!route || route.status !== 'ACTIVE') {
             return res.status(404).json({
                 success: false,
                 message: 'Tuyến xe không tồn tại'

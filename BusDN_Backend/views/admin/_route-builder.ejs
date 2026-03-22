@@ -1,0 +1,48 @@
+<div class="route-builder js-route-builder" data-builder-id="<%= builderId %>">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <div>
+            <h6 class="mb-1">Hành trình tuyến xe</h6>
+            <div class="small text-muted">Chọn trạm theo đúng thứ tự xe sẽ đi qua. Hệ thống sẽ tự xác định điểm đầu, điểm cuối và tạo chiều về ngược lại.</div>
+        </div>
+        <span class="badge text-bg-light border">Số trạm: <span class="js-stop-count">0</span></span>
+    </div>
+
+    <div class="row g-3 align-items-end mb-3">
+        <div class="col-md-9">
+            <label class="form-label">Chọn trạm để thêm vào hành trình</label>
+            <select class="form-select js-stop-select">
+                <option value="">-- Chọn trạm --</option>
+                <% stopOptions.forEach((stop) => { %>
+                    <option value="<%= String(stop._id) %>" <%= stop.status !== 'ACTIVE' ? 'disabled' : '' %>>
+                        <%= stop.name %><%= stop.address ? ` · ${stop.address}` : '' %><%= stop.status !== 'ACTIVE' ? ' · Tạm ngưng' : '' %>
+                    </option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="col-md-3 d-grid">
+            <button type="button" class="btn btn-outline-primary js-add-stop">
+                <i class="fas fa-plus"></i> Thêm trạm
+            </button>
+        </div>
+    </div>
+
+    <div class="route-points mb-3">
+        <div class="route-point-card">
+            <div class="label">Điểm đầu</div>
+            <strong class="js-start-stop">Chưa xác định</strong>
+        </div>
+        <div class="route-point-card">
+            <div class="label">Điểm cuối</div>
+            <strong class="js-end-stop">Chưa xác định</strong>
+        </div>
+    </div>
+
+    <div class="route-builder-empty js-route-builder-empty">Chưa có trạm nào trong hành trình.</div>
+    <ul class="route-builder-list js-route-builder-list mt-3"></ul>
+
+    <input
+        type="hidden"
+        name="stopSequence"
+        class="js-stop-sequence"
+        value='<%- JSON.stringify((sequence || []).map((stop) => String(stop.id || stop._id || stop.stopId || stop))) %>'>
+</div>

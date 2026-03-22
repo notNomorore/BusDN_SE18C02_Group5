@@ -1,0 +1,433 @@
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<%
+const form = formData || {};
+const stopOptions = Array.isArray(availableStops) ? availableStops : [];
+const dayOptions = Array.isArray(operatingDayOptions) ? operatingDayOptions : [];
+const stopStatuses = Array.isArray(stopStatusOptions) ? stopStatusOptions : [];
+const selectedDays = Array.isArray(form.operatingDays) ? form.operatingDays : [];
+const outboundStops = Array.isArray(form.outboundStops) ? form.outboundStops : [];
+const inboundStops = Array.isArray(form.inboundStops) ? form.inboundStops : [];
+const optionText = (value) => ({
+    REGULAR: 'Thường',
+    EXPRESS: 'Nhanh',
+    LOOP: 'Vòng tròn',
+    SHUTTLE: 'Trung chuyển',
+    URBAN: 'Nội đô',
+    SUBURBAN: 'Ngoại thành',
+    SCHOOL: 'Học sinh',
+    AIRPORT: 'Sân bay',
+    SPECIAL: 'Đặc biệt'
+}[value] || value);
+%>
+
+<style>
+    .route-form-section { border: 1px solid #dee2e6; border-radius: 12px; box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,.05); }
+    .route-direction-empty { border: 1px dashed #ced4da; border-radius: 12px; padding: 16px; text-align: center; color: #6c757d; background: #fafbfc; }
+    .route-workflow-box { background: #f8f9fa; }
+    .route-action-bar { position: sticky; bottom: 0; z-index: 5; background: rgba(248,249,250,.98); backdrop-filter: blur(8px); border-top: 1px solid #dee2e6; padding: 16px 0 0; }
+    .route-map-panel { position: sticky; top: 20px; }
+    .route-map { height: 520px; border-radius: 12px; overflow: hidden; border: 1px solid #dee2e6; }
+    .route-map-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; font-size: .95rem; }
+    .route-map-legend span { display: inline-flex; align-items: center; gap: 8px; }
+    .route-map-dot { width: 12px; height: 12px; border-radius: 999px; display: inline-block; }
+    .route-map-empty { background: #f8f9fa; border: 1px dashed #ced4da; border-radius: 12px; padding: 12px; color: #6c757d; text-align: center; margin-top: 12px; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <div>
+        <h2 class="mb-1">Tạo Tuyến Mới</h2>
+        <div class="text-muted small">Nhập thông tin tuyến, hành trình hai chiều và cấu hình vận hành. Bản đồ bên phải sẽ cập nhật theo các trạm bạn thêm vào.</div>
+    </div>
+    <a href="/admin/routes" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-1"></i> Quay lại danh sách</a>
+</div>
+
+<% if (success) { %><div class="alert alert-success"><%= success %></div><% } %>
+<% if (error) { %><div class="alert alert-danger"><%= error %></div><% } %>
+<% if (errors && errors.length > 1) { %>
+<div class="alert alert-warning"><div class="fw-semibold mb-2">Các lỗi cần xử lý</div><ul class="mb-0"><% errors.forEach((item) => { %><li><%= item %></li><% }) %></ul></div>
+<% } %>
+
+<form method="POST" action="/admin/routes/create" id="createBusRouteForm">
+    <div class="card route-form-section mb-4">
+        <div class="card-body">
+            <h4 class="mb-3">1. Thông tin cơ bản</h4>
+            <div class="row g-3">
+                <div class="col-md-4"><label class="form-label">Mã tuyến *</label><input type="text" name="routeCode" class="form-control" value="<%= form.routeCode || '' %>" required></div>
+                <div class="col-md-8"><label class="form-label">Tên tuyến</label><input type="text" name="routeName" class="form-control" value="<%= form.routeName || '' %>"></div>
+                <div class="col-md-6">
+                    <label class="form-label">Điểm đầu</label>
+                    <input type="text" class="form-control js-endpoint-search" data-endpoint="start" list="route-endpoint-options" placeholder="Nhập tên trạm hoặc địa chỉ...">
+                    <input type="hidden" name="startPoint" class="js-endpoint-id" data-endpoint="start" value="<%= form.startPoint || '' %>">
+                    <div class="form-text js-endpoint-selected-text" data-endpoint="start">Chưa chọn điểm đầu.</div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Điểm cuối</label>
+                    <input type="text" class="form-control js-endpoint-search" data-endpoint="end" list="route-endpoint-options" placeholder="Nhập tên trạm hoặc địa chỉ...">
+                    <input type="hidden" name="endPoint" class="js-endpoint-id" data-endpoint="end" value="<%= form.endPoint || '' %>">
+                    <div class="form-text js-endpoint-selected-text" data-endpoint="end">Chưa chọn điểm cuối.</div>
+                </div>
+                <div class="col-md-4"><label class="form-label">Ngày hiệu lực</label><input type="date" name="effectiveDate" class="form-control" min="<%= new Date().toISOString().slice(0, 10) %>" value="<%= form.effectiveDate || '' %>"></div>
+                <div class="col-md-4"><label class="form-label">Trạng thái</label><input type="text" class="form-control" value="<%= form.status || 'DRAFT' %>" readonly></div>
+                <div class="col-md-4"><label class="form-label">Luồng xử lý</label><div class="form-control route-workflow-box">Nháp -> Chờ duyệt -> Đã duyệt -> Lên lịch -> Hoạt động</div></div>
+                <div class="col-12"><label class="form-label">Mô tả</label><textarea name="description" rows="3" class="form-control"><%= form.description || '' %></textarea></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4 mb-4">
+        <div class="col-xl-7">
+            <div class="row g-4">
+                <div class="col-12"><%- include('_route-direction-editor', { directionName: 'outbound', directionTitle: '2. Trạm chiều đi', directionDescription: 'Quản lý danh sách trạm theo đúng thứ tự xe đi qua của chiều đi.', stops: outboundStops, availableStops: stopOptions, stopStatuses }) %></div>
+                <div class="col-12"><%- include('_route-direction-editor', { directionName: 'inbound', directionTitle: '3. Trạm chiều về', directionDescription: 'Quản lý danh sách trạm theo đúng thứ tự xe đi qua của chiều về.', stops: inboundStops, availableStops: stopOptions, stopStatuses }) %></div>
+            </div>
+        </div>
+        <div class="col-xl-5">
+            <div class="card route-form-section route-map-panel">
+                <div class="card-body">
+                    <h4 class="mb-2">Bản đồ tuyến</h4>
+                    <div class="text-muted small mb-3">Marker và đường tuyến sẽ cập nhật theo các trạm hợp lệ trên bản đồ.</div>
+                    <div id="routePreviewMap" class="route-map"></div>
+                    <div class="route-map-legend">
+                        <span><i class="route-map-dot" style="background:#1d4ed8;"></i> Chiều đi</span>
+                        <span><i class="route-map-dot" style="background:#f97316;"></i> Chiều về</span>
+                        <span><i class="route-map-dot" style="background:#16a34a;"></i> Điểm đầu / cuối</span>
+                    </div>
+                    <div class="route-map-empty js-route-map-empty">Chưa có đủ dữ liệu trạm để hiển thị tuyến trên bản đồ.</div>
+                    <div class="alert alert-warning d-none mt-3 mb-0 js-route-map-warning"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card route-form-section mb-4">
+        <div class="card-body">
+            <h4 class="mb-3">4. Cấu hình vận hành</h4>
+            <div class="row g-3">
+                <div class="col-12"><label class="form-label">Ngày hoạt động</label><div class="d-flex flex-wrap gap-3"><% dayOptions.forEach((day) => { %><div class="form-check"><input class="form-check-input" type="checkbox" name="operatingDays" id="opDay-<%= day.value %>" value="<%= day.value %>" <%= selectedDays.includes(day.value) ? 'checked' : '' %>><label class="form-check-label" for="opDay-<%= day.value %>"><%= day.label %></label></div><% }) %></div></div>
+                <div class="col-md-3"><label class="form-label">Giờ bắt đầu</label><input type="time" name="startTime" class="form-control" value="<%= form.startTime || '' %>"></div>
+                <div class="col-md-3"><label class="form-label">Giờ kết thúc</label><input type="time" name="endTime" class="form-control" value="<%= form.endTime || '' %>"></div>
+                <div class="col-md-2"><label class="form-label">Tần suất chuyến</label><input type="number" name="tripInterval" min="1" step="1" class="form-control" value="<%= form.tripInterval ?? '' %>"></div>
+                <div class="col-md-2"><label class="form-label">Thời gian hành trình</label><input type="number" name="estimatedRouteDuration" min="1" step="1" class="form-control" value="<%= form.estimatedRouteDuration ?? '' %>"></div>
+                <div class="col-md-2"><label class="form-label">Thời gian quay đầu</label><input type="number" name="turnaroundTime" min="0" step="1" class="form-control" value="<%= form.turnaroundTime ?? '' %>"></div>
+                <div class="col-12"><label class="form-label">Ghi chú</label><textarea name="notes" rows="3" class="form-control"><%= form.notes || '' %></textarea></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="route-action-bar">
+        <div class="d-flex justify-content-end gap-2 flex-wrap">
+            <a href="/admin/routes" class="btn btn-light border">Hủy</a>
+            <button type="submit" name="intent" value="save_draft" class="btn btn-outline-primary"><i class="fas fa-save me-1"></i> Lưu nháp</button>
+            <button type="submit" name="intent" value="submit_review" class="btn btn-primary"><i class="fas fa-paper-plane me-1"></i> Gửi duyệt</button>
+        </div>
+    </div>
+</form>
+
+<div class="modal fade" id="createStopInlineModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form id="createStopInlineForm">
+                <div class="modal-header"><h5 class="modal-title">Thêm trạm mới</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button></div>
+                <div class="modal-body">
+                    <div class="alert alert-danger d-none js-stop-create-error"></div>
+                    <div class="row g-3">
+                        <div class="col-md-6"><label class="form-label">Tên trạm *</label><input type="text" name="name" class="form-control" required></div>
+                        <div class="col-md-6"><label class="form-label">Địa chỉ</label><input type="text" name="address" class="form-control"></div>
+                        <div class="col-md-4"><label class="form-label">Vĩ độ (lat) *</label><input type="number" step="any" name="lat" class="form-control" required></div>
+                        <div class="col-md-4"><label class="form-label">Kinh độ (lng) *</label><input type="number" step="any" name="lng" class="form-control" required></div>
+                        <div class="col-md-4"><label class="form-label">Trạng thái</label><select class="form-select" name="status"><option value="ACTIVE" selected>Đang hoạt động</option><option value="INACTIVE">Tạm ngưng</option></select></div>
+                    </div>
+                </div>
+                <div class="modal-footer"><button type="button" class="btn btn-light" data-bs-dismiss="modal">Hủy</button><button type="submit" class="btn btn-primary"><i class="fas fa-plus me-1"></i> Tạo trạm</button></div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<datalist id="route-endpoint-options">
+    <% stopOptions.forEach((stop) => { %>
+        <option value="<%= stop.name %><%= stop.address ? ` · ${stop.address}` : '' %><%= stop.status !== 'ACTIVE' ? ' · Tạm ngưng' : '' %>"></option>
+    <% }) %>
+</datalist>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+window.__routeCreateStops = <%- JSON.stringify(stopOptions.map((stop) => ({ id: String(stop._id), name: stop.name, address: stop.address || '', status: stop.status || 'ACTIVE', lat: stop.lat || '', lng: stop.lng || '', searchLabel: `${stop.name}${stop.address ? ' · ' + stop.address : ''}${stop.status !== 'ACTIVE' ? ' · Tạm ngưng' : ''}` }))) %>;
+window.__routeStopStatuses = <%- JSON.stringify(stopStatuses) %>;
+document.addEventListener('DOMContentLoaded', function () {
+    const stopList = window.__routeCreateStops || [];
+    const stopMap = new Map(stopList.map((stop) => [stop.id, stop]));
+    const stopStatuses = Array.isArray(window.__routeStopStatuses) ? window.__routeStopStatuses : ['ACTIVE', 'INACTIVE'];
+    const directionState = { outbound: [], inbound: [] };
+    const endpoint = '/admin/stops/create-ajax';
+    const createStopModalEl = document.getElementById('createStopInlineModal');
+    const createStopForm = document.getElementById('createStopInlineForm');
+    const createStopErrorEl = createStopForm.querySelector('.js-stop-create-error');
+    const createStopModal = (createStopModalEl && window.bootstrap && window.bootstrap.Modal) ? new window.bootstrap.Modal(createStopModalEl) : null;
+    const mapEmptyEl = document.querySelector('.js-route-map-empty');
+    const mapWarningEl = document.querySelector('.js-route-map-warning');
+    let activeEditor = null;
+    let previewMap = null;
+    let markerLayer = null;
+    let outboundLine = null;
+    let inboundLine = null;
+    let mapRequestToken = 0;
+
+    function formatStopLabel(stop) { return stop ? `${stop.name}${stop.address ? ' · ' + stop.address : ''}${stop.status !== 'ACTIVE' ? ' · Tạm ngưng' : ''}` : 'Chưa chọn trạm.'; }
+    function getAllStops() { return Array.from(stopMap.values()).sort((a, b) => a.name.localeCompare(b.name, 'vi')); }
+    function parseCoord(value) {
+        if (value === null || value === undefined || value === '') return null;
+        const normalized = String(value).trim().replace(',', '.');
+        const parsed = Number(normalized);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    function findStopBySearchValue(value) {
+        const normalized = String(value || '').trim().toLowerCase();
+        if (!normalized) return null;
+        return getAllStops().find((stop) => String(stop.searchLabel || '').trim().toLowerCase() === normalized)
+            || getAllStops().find((stop) => String(stop.name || '').trim().toLowerCase() === normalized)
+            || null;
+    }
+    function refreshEndpointSearchDatalist() {
+        const datalist = document.getElementById('route-endpoint-options');
+        if (!datalist) return;
+        datalist.innerHTML = getAllStops().map((stop) => `<option value="${String(stop.searchLabel || '').replace(/"/g, '&quot;')}"></option>`).join('');
+    }
+    function refreshSearchDatalists() {
+        document.querySelectorAll('.route-direction-editor').forEach((editor) => {
+            const datalist = editor.querySelector('datalist');
+            if (!datalist) return;
+            datalist.innerHTML = getAllStops().map((stop) => `<option value="${String(stop.searchLabel || '').replace(/"/g, '&quot;')}"></option>`).join('');
+        });
+    }
+    function getStopCoords(stopId) {
+        const stop = stopMap.get(String(stopId || ''));
+        if (!stop) return null;
+        const lat = parseCoord(stop.lat);
+        const lng = parseCoord(stop.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        return { stop, latlng: [lat, lng] };
+    }
+    function setSelectedStop(editor, stopId) {
+        const stop = stopMap.get(String(stopId || ''));
+        editor.querySelector('.js-stop-selected-id').value = stop ? stop.id : '';
+        editor.querySelector('.js-stop-search').value = stop ? stop.searchLabel : '';
+        editor.querySelector('.js-stop-selected-text').textContent = stop ? `Đã chọn: ${formatStopLabel(stop)}` : 'Chưa chọn trạm.';
+    }
+    function setEndpointSelection(endpointKey, stopId) {
+        const searchInput = document.querySelector(`.js-endpoint-search[data-endpoint="${endpointKey}"]`);
+        const hiddenInput = document.querySelector(`.js-endpoint-id[data-endpoint="${endpointKey}"]`);
+        const textEl = document.querySelector(`.js-endpoint-selected-text[data-endpoint="${endpointKey}"]`);
+        const stop = stopMap.get(String(stopId || ''));
+        const emptyText = endpointKey === 'start' ? 'Chưa chọn điểm đầu.' : 'Chưa chọn điểm cuối.';
+
+        if (hiddenInput) hiddenInput.value = stop ? stop.id : '';
+        if (searchInput) searchInput.value = stop ? stop.searchLabel : '';
+        if (textEl) textEl.textContent = stop ? `Đã chọn: ${formatStopLabel(stop)}` : emptyText;
+    }
+    function bindEndpointSearch(endpointKey) {
+        const searchInput = document.querySelector(`.js-endpoint-search[data-endpoint="${endpointKey}"]`);
+        if (!searchInput) return;
+
+        function syncEndpoint() {
+            const stop = findStopBySearchValue(searchInput.value);
+            const hiddenInput = document.querySelector(`.js-endpoint-id[data-endpoint="${endpointKey}"]`);
+            const textEl = document.querySelector(`.js-endpoint-selected-text[data-endpoint="${endpointKey}"]`);
+            if (stop) {
+                setEndpointSelection(endpointKey, stop.id);
+                return;
+            }
+            if (hiddenInput) hiddenInput.value = '';
+            if (textEl) {
+                textEl.textContent = endpointKey === 'start'
+                    ? 'Chưa chọn điểm đầu.'
+                    : 'Chưa chọn điểm cuối.';
+            }
+        }
+
+        searchInput.addEventListener('input', syncEndpoint);
+        searchInput.addEventListener('change', syncEndpoint);
+        const initialValue = document.querySelector(`.js-endpoint-id[data-endpoint="${endpointKey}"]`)?.value || '';
+        setEndpointSelection(endpointKey, initialValue);
+    }
+    function initMap() {
+        if (!window.L) return;
+        previewMap = window.L.map('routePreviewMap').setView([16.047079, 108.206230], 12);
+        window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap contributors' }).addTo(previewMap);
+        markerLayer = window.L.layerGroup().addTo(previewMap);
+    }
+    async function buildRouteGeometry(coords) {
+        if (coords.length < 2) return null;
+        const osrmCoords = coords.map((item) => `${item.latlng[1]},${item.latlng[0]}`).join(';');
+        const url = `https://router.project-osrm.org/route/v1/driving/${osrmCoords}?overview=full&geometries=geojson`;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('OSRM request failed');
+        const data = await response.json();
+        if (!data.routes || !data.routes[0] || !data.routes[0].geometry) throw new Error('OSRM route missing');
+        return data.routes[0].geometry.coordinates.map((coord) => [coord[1], coord[0]]);
+    }
+    async function updateMap() {
+        if (!previewMap || !markerLayer) return;
+        const requestToken = ++mapRequestToken;
+        markerLayer.clearLayers();
+        if (outboundLine) previewMap.removeLayer(outboundLine);
+        if (inboundLine) previewMap.removeLayer(inboundLine);
+        outboundLine = null;
+        inboundLine = null;
+        const bounds = [];
+        const invalidStops = [];
+        const directionConfigs = [['outbound', '#1d4ed8', 'Chiều đi'], ['inbound', '#f97316', 'Chiều về']];
+        const directionCoords = directionConfigs.map(([key, color, label]) => {
+            const coords = directionState[key].map((item) => {
+                const coord = getStopCoords(item.stopId);
+                if (!coord) {
+                    const stop = stopMap.get(String(item.stopId || ''));
+                    if (stop) invalidStops.push(`${label}: ${stop.name}`);
+                }
+                return coord;
+            }).filter(Boolean);
+            coords.forEach((item, index) => {
+                const markerColor = index === 0 || index === coords.length - 1 ? '#16a34a' : color;
+                window.L.circleMarker(item.latlng, { radius: 7, color: '#fff', weight: 2, fillColor: markerColor, fillOpacity: 1 })
+                    .bindPopup(`<strong>${item.stop.name}</strong><br>${label} - Trạm ${index + 1}<br>${item.stop.address || 'Không có địa chỉ'}`)
+                    .addTo(markerLayer);
+                bounds.push(item.latlng);
+            });
+            return { key, color, coords };
+        });
+        if (!bounds.length) {
+            mapEmptyEl.classList.remove('d-none');
+            if (invalidStops.length) {
+                mapWarningEl.textContent = `Các trạm chưa có tọa độ hợp lệ: ${invalidStops.join(', ')}. Hãy cập nhật lat/lng trong Quản lý Trạm dừng.`;
+                mapWarningEl.classList.remove('d-none');
+            } else {
+                mapWarningEl.classList.add('d-none');
+                mapWarningEl.textContent = '';
+            }
+            previewMap.setView([16.047079, 108.206230], 12);
+            return;
+        }
+        mapEmptyEl.classList.add('d-none');
+        if (invalidStops.length) {
+            mapWarningEl.textContent = `Một số trạm không được vẽ vì thiếu tọa độ hợp lệ: ${invalidStops.join(', ')}.`;
+            mapWarningEl.classList.remove('d-none');
+        } else {
+            mapWarningEl.classList.add('d-none');
+            mapWarningEl.textContent = '';
+        }
+        previewMap.fitBounds(bounds, { padding: [24, 24] });
+        await Promise.all(directionCoords.map(async ({ key, color, coords }) => {
+            if (coords.length < 2) return;
+            let path = coords.map((item) => item.latlng);
+            try { path = await buildRouteGeometry(coords); } catch (err) {}
+            if (requestToken !== mapRequestToken) return;
+            const line = window.L.polyline(path, { color, weight: 4, opacity: .9 }).addTo(previewMap);
+            if (key === 'outbound') outboundLine = line;
+            else inboundLine = line;
+        }));
+    }
+    function createStopRowMarkup(item, index) {
+        const stop = stopMap.get(String(item.stopId || ''));
+        const stopText = stop ? `${stop.name}${stop.address ? ' · ' + stop.address : ''}` : 'Trạm không xác định';
+        return `<tr data-stop-id="${String(item.stopId || '')}"><td><div class="fw-semibold">${index + 1}. ${stopText}</div><div class="small text-muted">Trạm trong hành trình</div></td><td><input type="number" class="form-control form-control-sm js-minutes" min="0" step="1" value="${Number(item.estimatedMinutesFromStart || 0)}"></td><td><input type="number" class="form-control form-control-sm js-distance" min="0" step="0.1" value="${Number(item.distanceFromStart || 0)}"></td><td class="text-center"><input type="checkbox" class="form-check-input js-pickup" ${item.pickupAllowed !== false ? 'checked' : ''}></td><td class="text-center"><input type="checkbox" class="form-check-input js-dropoff" ${item.dropoffAllowed !== false ? 'checked' : ''}></td><td><select class="form-select form-control-sm js-status">${stopStatuses.map((status) => `<option value="${status}" ${item.status === status ? 'selected' : ''}>${status}</option>`).join('')}</select></td><td class="text-nowrap"><div class="btn-group btn-group-sm"><button type="button" class="btn btn-outline-secondary js-move-up" ${index === 0 ? 'disabled' : ''}><i class="fas fa-arrow-up"></i></button><button type="button" class="btn btn-outline-secondary js-move-down"><i class="fas fa-arrow-down"></i></button><button type="button" class="btn btn-outline-danger js-remove-stop"><i class="fas fa-trash"></i></button></div></td></tr>`;
+    }
+    function bindSearch(editor) {
+        const input = editor.querySelector('.js-stop-search');
+        input.addEventListener('input', function () {
+            const stop = findStopBySearchValue(input.value);
+            if (stop) setSelectedStop(editor, stop.id);
+            else { editor.querySelector('.js-stop-selected-id').value = ''; editor.querySelector('.js-stop-selected-text').textContent = 'Chưa chọn trạm.'; }
+        });
+        input.addEventListener('change', function () {
+            const stop = findStopBySearchValue(input.value);
+            if (stop) setSelectedStop(editor, stop.id);
+        });
+    }
+    function renderDirection(editor) {
+        const directionKey = editor.dataset.direction;
+        const hiddenInput = editor.querySelector('.js-direction-json');
+        const tableBody = editor.querySelector('.js-stop-table-body');
+        const emptyEl = editor.querySelector('.js-stop-empty');
+        const countEl = editor.querySelector('.js-stop-count');
+        let stops = [];
+        try { stops = JSON.parse(hiddenInput.value || '[]'); } catch (err) { stops = []; }
+        function syncHidden() {
+            hiddenInput.value = JSON.stringify(stops.map((item, index) => ({ stopId: item.stopId, sequenceOrder: index + 1, estimatedMinutesFromStart: Number(item.estimatedMinutesFromStart || 0), distanceFromStart: Number(item.distanceFromStart || 0), pickupAllowed: item.pickupAllowed !== false, dropoffAllowed: item.dropoffAllowed !== false, status: item.status || 'ACTIVE' })));
+            directionState[directionKey] = stops.slice();
+            updateMap();
+        }
+        function bindRowEvents() {
+            Array.from(tableBody.querySelectorAll('tr')).forEach((row, index) => {
+                row.querySelector('.js-move-up').onclick = function () { if (index === 0) return; [stops[index - 1], stops[index]] = [stops[index], stops[index - 1]]; render(); };
+                row.querySelector('.js-move-down').onclick = function () { if (index >= stops.length - 1) return; [stops[index + 1], stops[index]] = [stops[index], stops[index + 1]]; render(); };
+                row.querySelector('.js-remove-stop').onclick = function () { stops.splice(index, 1); render(); };
+                row.querySelector('.js-minutes').oninput = function () { stops[index].estimatedMinutesFromStart = Number(this.value || 0); syncHidden(); };
+                row.querySelector('.js-distance').oninput = function () { stops[index].distanceFromStart = Number(this.value || 0); syncHidden(); };
+                row.querySelector('.js-pickup').onchange = function () { stops[index].pickupAllowed = this.checked; syncHidden(); };
+                row.querySelector('.js-dropoff').onchange = function () { stops[index].dropoffAllowed = this.checked; syncHidden(); };
+                row.querySelector('.js-status').onchange = function () { stops[index].status = this.value; syncHidden(); };
+            });
+        }
+        function render() {
+            tableBody.innerHTML = '';
+            emptyEl.classList.toggle('d-none', stops.length > 0);
+            stops.forEach((item, index) => tableBody.insertAdjacentHTML('beforeend', createStopRowMarkup(item, index)));
+            countEl.textContent = String(stops.length);
+            syncHidden();
+            bindRowEvents();
+        }
+        editor.querySelector('.js-add-stop').addEventListener('click', function () {
+            const selectedId = String(editor.querySelector('.js-stop-selected-id').value || '');
+            if (!selectedId) return window.alert('Vui lòng chọn một trạm từ ô tìm kiếm.');
+            const stop = stopMap.get(selectedId);
+            if (!stop) return;
+            if (stop.status !== 'ACTIVE') return window.alert('Chỉ có thể thêm trạm đang hoạt động vào hành trình.');
+            if (stops.some((item) => String(item.stopId || '') === selectedId)) return window.alert('Trạm này đã tồn tại trong chiều tuyến này.');
+            stops.push({ stopId: selectedId, sequenceOrder: stops.length + 1, estimatedMinutesFromStart: 0, distanceFromStart: 0, pickupAllowed: true, dropoffAllowed: true, status: 'ACTIVE' });
+            setSelectedStop(editor, '');
+            render();
+        });
+        editor.querySelector('.js-open-stop-create-modal').addEventListener('click', function () {
+            activeEditor = editor;
+            createStopErrorEl.classList.add('d-none');
+            createStopErrorEl.textContent = '';
+            createStopForm.reset();
+            if (createStopModal) createStopModal.show();
+        });
+        bindSearch(editor);
+        render();
+    }
+    createStopForm.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        createStopErrorEl.classList.add('d-none');
+        createStopErrorEl.textContent = '';
+        const submitButton = createStopForm.querySelector('button[type="submit"]');
+        submitButton.disabled = true;
+        try {
+            const response = await fetch(endpoint, { method: 'POST', body: new FormData(createStopForm), headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            const payload = await response.json();
+            if (!response.ok || !payload.ok) throw new Error(payload.error || 'Không thể tạo trạm mới.');
+            const stop = payload.stop;
+            stop.searchLabel = `${stop.name}${stop.address ? ' · ' + stop.address : ''}${stop.status !== 'ACTIVE' ? ' · Tạm ngưng' : ''}`;
+            stopMap.set(stop.id, stop);
+            stopList.push(stop);
+            refreshEndpointSearchDatalist();
+            refreshSearchDatalists();
+            if (activeEditor) setSelectedStop(activeEditor, stop.id);
+            if (createStopModal) createStopModal.hide();
+            createStopForm.reset();
+        } catch (err) {
+            createStopErrorEl.textContent = err.message || 'Không thể tạo trạm mới.';
+            createStopErrorEl.classList.remove('d-none');
+        } finally {
+            submitButton.disabled = false;
+        }
+    });
+    initMap();
+    refreshEndpointSearchDatalist();
+    refreshSearchDatalists();
+    bindEndpointSearch('start');
+    bindEndpointSearch('end');
+    document.querySelectorAll('.route-direction-editor').forEach(renderDirection);
+});
+</script>

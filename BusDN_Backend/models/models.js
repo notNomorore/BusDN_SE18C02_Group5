@@ -4,20 +4,20 @@ const mongoose = require('mongoose');
 const UserSchema = new mongoose.Schema({
     email: { type: String, required: false, unique: true, sparse: true, trim: true },
     password: { type: String, required: true },
-    fullName: { type: String, default: "Hành khách" },
+    fullName: { type: String, default: 'Hành khách' },
     phone: {
         type: String,
         trim: true,
         unique: true,
         sparse: true,
-        required: function () {
+        required: function reqPhone() {
             return !this.email;
         }
     },
-    avatar: { type: String, default: "/images/default-avatar.png" },
+    avatar: { type: String, default: '/images/default-avatar.png' },
     role: {
         type: String,
-        enum: ['PASSENGER', 'DRIVER', 'CONDUCTOR', 'ADMIN'], // CONDUCTOR = ASSISTANT (Phụ xe)
+        enum: ['PASSENGER', 'DRIVER', 'CONDUCTOR', 'ASSISTANT', 'ADMIN', 'STAFF', 'FINANCE'],
         default: 'PASSENGER'
     },
     isVerified: { type: Boolean, default: false },
@@ -37,11 +37,7 @@ const UserSchema = new mongoose.Schema({
         enum: ['NONE', 'PENDING', 'APPROVED', 'REJECTED', 'EXPIRED'],
         default: 'NONE'
     },
-
-    // Tài chính (Từ Model 2)
     walletBalance: { type: Number, default: 0 },
-
-    // Hồ sơ ưu tiên (Tích hợp từ Model 1)
     priorityProfile: {
         cardImageFront: String,
         cardImageBack: String,
@@ -55,7 +51,7 @@ const UserSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
-UserSchema.pre('save', async function () { // Bỏ next
+UserSchema.pre('save', async function syncLockStatus() {
     if (this.status === 'LOCKED') {
         this.isLocked = true;
     } else if (this.status === 'ACTIVE') {
@@ -63,7 +59,6 @@ UserSchema.pre('save', async function () { // Bỏ next
     } else if (this.isModified('isLocked')) {
         this.status = this.isLocked ? 'LOCKED' : 'ACTIVE';
     }
-    // Không gọi next() nữa, chỉ cần kết thúc hàm là xong
 });
 
 // --- 2. ĐIỂM DỪNG (STOP) ---
@@ -80,58 +75,118 @@ const StopSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
-// --- 3. TUYẾN ĐƯỜNG (ROUTE) ---
-const RouteSchema = new mongoose.Schema({
-    routeNumber: { type: String, required: true, unique: true, trim: true },
-    name: { type: String, required: true, trim: true },
-    description: { type: String, default: '' },
-    distance: { type: Number, default: 0 },
-    monthlyPassPrice: { type: Number, default: 200000 },
+const RouteDirectionStopSchema = new mongoose.Schema({
+    stopId: { type: mongoose.Schema.Types.ObjectId, ref: 'Stop', required: true },
+    sequenceOrder: { type: Number, required: true },
+    estimatedMinutesFromStart: { type: Number, default: 0 },
+    distanceFromStart: { type: Number, default: 0 },
+    pickupAllowed: { type: Boolean, default: true },
+    dropoffAllowed: { type: Boolean, default: true },
     status: {
         type: String,
         enum: ['ACTIVE', 'INACTIVE'],
         default: 'ACTIVE'
+    }
+}, { _id: false });
+
+const RouteDirectionSchema = new mongoose.Schema({
+    directionKey: {
+        type: String,
+        enum: ['OUTBOUND', 'INBOUND'],
+        required: true
+    },
+    startStopId: { type: mongoose.Schema.Types.ObjectId, ref: 'Stop', default: null },
+    endStopId: { type: mongoose.Schema.Types.ObjectId, ref: 'Stop', default: null },
+    stops: { type: [RouteDirectionStopSchema], default: [] }
+}, { _id: false });
+
+const RouteOperationSettingsSchema = new mongoose.Schema({
+    operatingDays: { type: [String], default: [] },
+    startTime: { type: String, default: '' },
+    endTime: { type: String, default: '' },
+    tripInterval: { type: Number, default: null },
+    estimatedRouteDuration: { type: Number, default: null },
+    turnaroundTime: { type: Number, default: null },
+    notes: { type: String, default: '' }
+}, { _id: false });
+
+const RouteAuditLogSchema = new mongoose.Schema({
+    action: { type: String, required: true, trim: true },
+    fromStatus: { type: String, default: null },
+    toStatus: { type: String, default: null },
+    message: { type: String, default: '' },
+    performedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    performedAt: { type: Date, default: Date.now }
+}, { _id: false });
+
+// --- 3. TUYẾN (ROUTE) ---
+const RouteSchema = new mongoose.Schema({
+    routeNumber: { type: String, required: true, unique: true, trim: true },
+    name: { type: String, default: '', trim: true },
+    description: { type: String, default: '' },
+    distance: { type: Number, default: 0 },
+    routeType: { type: String, default: '' },
+    serviceType: { type: String, default: '' },
+    startStopId: { type: mongoose.Schema.Types.ObjectId, ref: 'Stop', default: null },
+    endStopId: { type: mongoose.Schema.Types.ObjectId, ref: 'Stop', default: null },
+    effectiveDate: { type: Date, default: null },
+    monthlyPassPrice: { type: Number, default: 200000 },
+    status: {
+        type: String,
+        enum: ['DRAFT', 'PENDING_REVIEW', 'APPROVED', 'SCHEDULED', 'ACTIVE', 'REJECTED', 'SUSPENDED', 'INACTIVE'],
+        default: 'DRAFT'
     },
     operationTime: {
-        start: { type: String, default: "05:00" },
-        end: { type: String, default: "21:00" }
+        start: String,
+        end: String
     },
-    /** Phút giữa 2 chuyến xuất bến (doc: tần suất) */
+    /** Phút giữa 2 chuyến xuất bến (lịch / doc tần suất) */
     frequencyMinutes: { type: Number, default: 15, min: 1 },
     /** Thời gian chạy hết một vòng tuyến (phút) */
     roundTripMinutes: { type: Number, default: 60, min: 1 },
-    /** Nghỉ giữa các chuyến / buffer (phút) — dùng tính chồng lấn */
+    /** Nghỉ giữa các chuyến / buffer (phút) */
     bufferMinutes: { type: Number, default: 10, min: 0 },
+    operationSettings: {
+        type: RouteOperationSettingsSchema,
+        default: () => ({})
+    },
+    directions: {
+        outbound: {
+            type: RouteDirectionSchema,
+            default: () => ({ directionKey: 'OUTBOUND', stops: [] })
+        },
+        inbound: {
+            type: RouteDirectionSchema,
+            default: () => ({ directionKey: 'INBOUND', stops: [] })
+        }
+    },
+    auditLogs: { type: [RouteAuditLogSchema], default: [] },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     stops: [{
         stopId: { type: mongoose.Schema.Types.ObjectId, ref: 'Stop' },
         orderIndex: Number,
-        direction: { type: String, enum: ['OUTBOUND', 'INBOUND'] }, // Đi và Về
+        direction: { type: String, enum: ['OUTBOUND', 'INBOUND'] },
         distanceFromStart: Number
     }]
 }, { timestamps: true });
 
-// --- 4. XE BUÝT (BUS) ---
+// --- 4. XE (BUS) ---
 const BusSchema = new mongoose.Schema({
     licensePlate: { type: String, required: true, unique: true },
     brand: String,
     capacity: { type: Number, default: 45 },
-    status: {
-        type: String,
-        enum: ['READY', 'RUNNING', 'MAINTENANCE'],
-        default: 'READY'
-    }
+    status: { type: String, enum: ['READY', 'RUNNING', 'MAINTENANCE'], default: 'READY' }
 }, { timestamps: true });
 
 // --- 5. LỊCH CHẠY (SCHEDULE) ---
 const ScheduleSchema = new mongoose.Schema({
     driverId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-    conductorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }, // Phụ xe
+    conductorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     busId: { type: mongoose.Schema.Types.ObjectId, ref: 'Bus', default: null },
     routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route', required: true },
     date: { type: Date, required: true },
-    /** Giờ xuất bến của chuyến (HH:mm). Rỗng = lịch dạng ca (legacy) */
     departureTime: { type: String, default: null },
-    /** Độ dài khối thời gian chiếm chỗ (vòng + buffer), phút */
     slotDurationMinutes: { type: Number, default: null },
     shiftTime: {
         start: String,
@@ -143,7 +198,6 @@ const ScheduleSchema = new mongoose.Schema({
         default: 'SCHEDULED'
     },
     archived: { type: Boolean, default: false },
-    // Trip log fields (updated after completion)
     actualStart: { type: String, default: null },
     actualEnd: { type: String, default: null },
     passengerCount: { type: Number, default: 0 },
@@ -155,7 +209,7 @@ ScheduleSchema.index({ routeId: 1, date: 1 });
 ScheduleSchema.index({ driverId: 1, date: 1 });
 ScheduleSchema.index({ busId: 1, date: 1 });
 
-// --- 6. HỒ SƠ ƯU TIÊN CHI TIẾT (PRIORITY PROFILE - Model 1) ---
+// --- 6. HỒ SƠ ƯU TIÊN ---
 const PriorityProfileSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     category: {
@@ -199,44 +253,60 @@ const PhoneVerificationSchema = new mongoose.Schema({
 
 PhoneVerificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
-// --- 7. GIAO DỊCH VÍ (WALLET TRANSACTION - Model 2) ---
+// --- 7. GIAO DỊCH VÍ ---
 const WalletTransactionSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    txnRef: { type: String, unique: true, sparse: true }, // Mã tham chiếu VNPAY
+    txnRef: { type: String, unique: true, sparse: true },
     amount: { type: Number, required: true },
     direction: { type: String, enum: ['IN', 'OUT'], required: true },
     txnType: { type: String, enum: ['DEPOSIT', 'MONTHLY_PASS', 'TICKET'], required: true },
     note: { type: String, default: '' },
-    method: { type: String, enum: ['VNPAY', 'WALLET'], default: 'VNPAY' },
+    method: {
+        type: String,
+        enum: ['VNPAY', 'MOMO', 'WALLET', 'PAYOS'],
+        default: 'VNPAY'
+    },
     status: {
         type: String,
         enum: ['PENDING', 'SUCCESS', 'FAILED', 'CANCELLED'],
         default: 'PENDING'
     },
-    vnpTransactionNo: String,
-    bankCode: String,
-    payDate: String,
+    vnpTransactionNo: { type: String, default: '' },
+    bankCode: { type: String, default: '' },
+    cardType: { type: String, default: '' },
+    payDate: { type: String, default: '' },
+    responseCode: { type: String, default: '' },
+    transactionStatus: { type: String, default: '' },
     originalAmount: { type: Number, default: null },
     discountAmount: { type: Number, default: 0 },
-    relatedMonthlyPassId: { type: mongoose.Schema.Types.ObjectId, ref: 'MonthlyPass', default: null }
+    relatedMonthlyPassId: { type: mongoose.Schema.Types.ObjectId, ref: 'MonthlyPass', default: null },
+    rawReturn: { type: Object, default: null },
+    rawIpn: { type: Object, default: null },
+    paidAt: { type: Date, default: null }
 }, { timestamps: true });
 
-// --- 8. VÉ THÁNG (MONTHLY PASS - Model 2) ---
+// --- 8. VÉ THÁNG ---
 const MonthlyPassSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    passType: {
+        type: String,
+        enum: ['SINGLE_ROUTE', 'INTER_ROUTE'],
+        default: 'SINGLE_ROUTE'
+    },
     routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route', required: true },
     routeSnapshot: {
-        routeNumber: String,
-        name: String
+        routeNumber: { type: String, default: '' },
+        name: { type: String, default: '' }
     },
     passCode: { type: String, required: true, unique: true },
     month: { type: Number, required: true },
     year: { type: Number, required: true },
-    validFrom: Date,
-    validTo: Date,
-    pricePaid: Number,
+    validFrom: { type: Date, required: true },
+    validTo: { type: Date, required: true },
+    pricePaid: { type: Number, required: true },
     originalPrice: { type: Number, default: null },
     discountAmount: { type: Number, default: 0 },
+    paidBy: { type: String, enum: ['WALLET', 'PAYOS', 'VNPAY', 'MOMO'], default: 'WALLET' },
     status: {
         type: String,
         enum: ['ACTIVE', 'EXPIRED', 'CANCELLED'],
@@ -244,10 +314,9 @@ const MonthlyPassSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
-// Index để tránh mua trùng vé cùng tuyến trong cùng 1 tháng
 MonthlyPassSchema.index({ userId: 1, routeId: 1, month: 1, year: 1 }, { unique: true });
 
-// --- 8.1 VÉ LẺ THEO CHUYẾN (TRIP TICKET) ---
+// --- 8.1 VÉ LẺ THEO CHUYẾN ---
 const TripTicketSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     scheduleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Schedule', required: true },
@@ -282,7 +351,7 @@ const NotificationSchema = new mongoose.Schema({
     sentAt: { type: Date, default: Date.now }
 }, { timestamps: true });
 
-// --- 10. BÁO CÁO MẤT ĐỒ ---
+// --- 10. MẤT ĐỒ ---
 const LostFoundSchema = new mongoose.Schema({
     description: { type: String, required: true, trim: true },
     location: { type: String, required: true, trim: true },
@@ -297,7 +366,7 @@ const LostFoundSchema = new mongoose.Schema({
     notes: { type: String, default: '' }
 }, { timestamps: true });
 
-// --- 11. PHẢN HỒI / KHIẾU NẠI KHÁCH HÀNG ---
+// --- 11. PHẢN HỒI ---
 const FeedbackSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     name: { type: String, default: '', trim: true },
@@ -321,7 +390,76 @@ const FeedbackSchema = new mongoose.Schema({
     repliedAt: { type: Date, default: null }
 }, { timestamps: true });
 
-// --- XUẤT MODELS ---
+// --- UC Marketing: khuyến mãi ---
+const PromotionSchema = new mongoose.Schema({
+    code: { type: String, required: true, unique: true, trim: true, uppercase: true },
+    name: { type: String, required: true, trim: true },
+    description: { type: String, default: '', trim: true },
+    discountType: {
+        type: String,
+        enum: ['PERCENT', 'FIXED'],
+        default: 'PERCENT'
+    },
+    discountValue: { type: Number, required: true, min: 0 },
+    maxDiscountValue: { type: Number, default: null, min: 0 },
+    minOrderValue: { type: Number, default: 0, min: 0 },
+    applyScope: {
+        type: String,
+        enum: ['ALL', 'SINGLE_ROUTE', 'INTER_ROUTE'],
+        default: 'ALL'
+    },
+    routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route', default: null },
+    startAt: { type: Date, required: true },
+    endAt: { type: Date, required: true },
+    status: {
+        type: String,
+        enum: ['DRAFT', 'SCHEDULED', 'ACTIVE', 'ENDED', 'CANCELLED'],
+        default: 'DRAFT'
+    },
+    endedEarlyAt: { type: Date, default: null },
+    usageLimitTotal: { type: Number, default: null, min: 1 },
+    usageLimitPerUser: { type: Number, default: 1, min: 1 },
+    usageCount: { type: Number, default: 0, min: 0 },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
+}, { timestamps: true });
+
+PromotionSchema.index({ status: 1, startAt: 1, endAt: 1 });
+
+const FareTierSchema = new mongoose.Schema({
+    maxDistanceKm: { type: Number, default: null },
+    price: { type: Number, required: true, min: 0 }
+}, { _id: false });
+
+const FareMatrixSchema = new mongoose.Schema({
+    code: { type: String, default: 'DEFAULT', unique: true, uppercase: true, trim: true },
+    singleRide: {
+        basePrice: { type: Number, default: 7000, min: 0 },
+        distanceTiers: { type: [FareTierSchema], default: [] }
+    },
+    monthly: {
+        interRoutePrice: { type: Number, default: 300000, min: 0 },
+        singleRouteDefaultPrice: { type: Number, default: 200000, min: 0 }
+    },
+    priorityDiscounts: {
+        defaultPercent: { type: Number, default: 20, min: 0, max: 100 },
+        studentPercent: { type: Number, default: null, min: 0, max: 100 },
+        warVeteranPercent: { type: Number, default: null, min: 0, max: 100 },
+        disabledPercent: { type: Number, default: null, min: 0, max: 100 },
+        elderlyPercent: { type: Number, default: null, min: 0, max: 100 },
+        otherPercent: { type: Number, default: null, min: 0, max: 100 }
+    },
+    freeRideRules: {
+        enabled: { type: Boolean, default: true },
+        underAge: { type: Number, default: 6, min: 0, max: 120 },
+        overAge: { type: Number, default: 80, min: 0, max: 120 },
+        priorityCategories: { type: [String], default: ['disabled', 'war veteran'] },
+        note: { type: String, default: '' }
+    },
+    updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    active: { type: Boolean, default: true }
+}, { timestamps: true });
+
 module.exports = {
     User: mongoose.models.User || mongoose.model('User', UserSchema),
     Stop: mongoose.models.Stop || mongoose.model('Stop', StopSchema),
@@ -336,5 +474,7 @@ module.exports = {
     TripTicket: mongoose.models.TripTicket || mongoose.model('TripTicket', TripTicketSchema),
     Notification: mongoose.models.Notification || mongoose.model('Notification', NotificationSchema),
     LostFound: mongoose.models.LostFound || mongoose.model('LostFound', LostFoundSchema),
-    Feedback: mongoose.models.Feedback || mongoose.model('Feedback', FeedbackSchema)
+    Feedback: mongoose.models.Feedback || mongoose.model('Feedback', FeedbackSchema),
+    Promotion: mongoose.models.Promotion || mongoose.model('Promotion', PromotionSchema),
+    FareMatrix: mongoose.models.FareMatrix || mongoose.model('FareMatrix', FareMatrixSchema)
 };

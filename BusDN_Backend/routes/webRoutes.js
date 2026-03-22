@@ -75,6 +75,7 @@ module.exports = (upload) => {
             }
 
             if (user.role === 'ADMIN') return res.redirect('/admin/dashboard');
+            if (user.role === 'FINANCE') return res.redirect('/admin/fares');
             if (user.role === 'PASSENGER') return res.redirect('/home');
             return res.redirect('/profile');
         } catch (err) {

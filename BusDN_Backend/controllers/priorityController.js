@@ -280,45 +280,69 @@ exports.viewProfileDetail = async (req, res) => {
 exports.approveProfile = async (req, res) => {
     try {
         const { profileId } = req.params;
+
         const approvalDate = new Date();
         const minExpiryDate = getMinPriorityExpiryDate(approvalDate);
 
-        let parsedExpiry = req.body?.expiryDate ? new Date(req.body.expiryDate) : minExpiryDate;
-        if (Number.isNaN(parsedExpiry.getTime())) {
+        // parse expiry
+        let expiryDate = req.body?.expiryDate
+            ? new Date(req.body.expiryDate)
+            : minExpiryDate;
+
+        if (Number.isNaN(expiryDate.getTime())) {
             return res.status(400).json({ error: 'Ngay het han khong hop le.' });
         }
-        parsedExpiry.setHours(0, 0, 0, 0);
 
-        if (!isExpiryDateValid(parsedExpiry, approvalDate)) {
+        expiryDate.setHours(0, 0, 0, 0);
+
+        if (!isExpiryDateValid(expiryDate, approvalDate)) {
             return res.status(400).json({
                 error: `Ngay het han phai tu ${minExpiryDate.toLocaleDateString('vi-VN')} tro di.`
             });
         }
 
+        // find profile
         const profile = await PriorityProfile.findById(profileId).populate('userId');
+
         if (!profile) {
             return res.status(404).json({ error: 'Profile not found' });
         }
 
+        // update profile
         profile.status = 'approved';
-        profile.expiryDate = parsedExpiry;
+        profile.expiryDate = expiryDate;
         profile.rejectionReason = null;
+
         await profile.save();
+
+        // sync user priority (🔥 QUAN TRỌNG)
         await syncUserPriorityApproved(profile.userId._id, profile);
 
+        // send email
         if (profile.userId?.email) {
             await sendEmail(
                 profile.userId.email,
                 'BusDN - Ho so uu tien da duoc phe duyet',
-                getApprovalEmailHtml(profile.userId.fullName, parsedExpiry)
+                getApprovalEmailHtml(profile.userId.fullName, expiryDate)
             );
         }
 
+        // socket update
         await emitPendingPriorityCount();
-        return res.json({ success: true, message: 'Profile approved successfully' });
+
+        console.log(`✅ Approved profile ${profileId} - Expiry: ${expiryDate}`);
+
+        return res.json({
+            success: true,
+            message: 'Profile approved successfully'
+        });
+
     } catch (error) {
         console.error('Error approving profile:', error);
-        return res.status(500).json({ error: 'Error approving profile' });
+
+        return res.status(500).json({
+            error: 'Error approving profile'
+        });
     }
 };
 
