@@ -96,6 +96,12 @@ const RouteSchema = new mongoose.Schema({
         start: { type: String, default: "05:00" },
         end: { type: String, default: "21:00" }
     },
+    /** Phút giữa 2 chuyến xuất bến (doc: tần suất) */
+    frequencyMinutes: { type: Number, default: 15, min: 1 },
+    /** Thời gian chạy hết một vòng tuyến (phút) */
+    roundTripMinutes: { type: Number, default: 60, min: 1 },
+    /** Nghỉ giữa các chuyến / buffer (phút) — dùng tính chồng lấn */
+    bufferMinutes: { type: Number, default: 10, min: 0 },
     stops: [{
         stopId: { type: mongoose.Schema.Types.ObjectId, ref: 'Stop' },
         orderIndex: Number,
@@ -123,10 +129,20 @@ const ScheduleSchema = new mongoose.Schema({
     busId: { type: mongoose.Schema.Types.ObjectId, ref: 'Bus', default: null },
     routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route', required: true },
     date: { type: Date, required: true },
+    /** Giờ xuất bến của chuyến (HH:mm). Rỗng = lịch dạng ca (legacy) */
+    departureTime: { type: String, default: null },
+    /** Độ dài khối thời gian chiếm chỗ (vòng + buffer), phút */
+    slotDurationMinutes: { type: Number, default: null },
     shiftTime: {
         start: String,
         end: String
     },
+    status: {
+        type: String,
+        enum: ['SCHEDULED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'],
+        default: 'SCHEDULED'
+    },
+    archived: { type: Boolean, default: false },
     // Trip log fields (updated after completion)
     actualStart: { type: String, default: null },
     actualEnd: { type: String, default: null },
@@ -134,6 +150,10 @@ const ScheduleSchema = new mongoose.Schema({
     revenue: { type: Number, default: 0 },
     notes: { type: String, default: '' }
 }, { timestamps: true });
+
+ScheduleSchema.index({ routeId: 1, date: 1 });
+ScheduleSchema.index({ driverId: 1, date: 1 });
+ScheduleSchema.index({ busId: 1, date: 1 });
 
 // --- 6. HỒ SƠ ƯU TIÊN CHI TIẾT (PRIORITY PROFILE - Model 1) ---
 const PriorityProfileSchema = new mongoose.Schema({
@@ -185,7 +205,7 @@ const WalletTransactionSchema = new mongoose.Schema({
     txnRef: { type: String, unique: true, sparse: true }, // Mã tham chiếu VNPAY
     amount: { type: Number, required: true },
     direction: { type: String, enum: ['IN', 'OUT'], required: true },
-    txnType: { type: String, enum: ['DEPOSIT', 'MONTHLY_PASS'], required: true },
+    txnType: { type: String, enum: ['DEPOSIT', 'MONTHLY_PASS', 'TICKET'], required: true },
     note: { type: String, default: '' },
     method: { type: String, enum: ['VNPAY', 'WALLET'], default: 'VNPAY' },
     status: {
@@ -226,6 +246,24 @@ const MonthlyPassSchema = new mongoose.Schema({
 
 // Index để tránh mua trùng vé cùng tuyến trong cùng 1 tháng
 MonthlyPassSchema.index({ userId: 1, routeId: 1, month: 1, year: 1 }, { unique: true });
+
+// --- 8.1 VÉ LẺ THEO CHUYẾN (TRIP TICKET) ---
+const TripTicketSchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    scheduleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Schedule', required: true },
+    routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route', required: true },
+    seatLabel: { type: String, required: true, trim: true },
+    pricePaid: { type: Number, required: true },
+    qrCode: { type: String, required: true, unique: true, trim: true },
+    status: {
+        type: String,
+        enum: ['BOOKED', 'USED', 'CANCELLED'],
+        default: 'BOOKED'
+    },
+    usedAt: { type: Date, default: null }
+}, { timestamps: true });
+
+TripTicketSchema.index({ scheduleId: 1, seatLabel: 1, status: 1 });
 
 // --- 9. THÔNG BÁO IN-APP ---
 const NotificationSchema = new mongoose.Schema({
@@ -295,6 +333,7 @@ module.exports = {
     PhoneVerification: mongoose.models.PhoneVerification || mongoose.model('PhoneVerification', PhoneVerificationSchema),
     WalletTransaction: mongoose.models.WalletTransaction || mongoose.model('WalletTransaction', WalletTransactionSchema),
     MonthlyPass: mongoose.models.MonthlyPass || mongoose.model('MonthlyPass', MonthlyPassSchema),
+    TripTicket: mongoose.models.TripTicket || mongoose.model('TripTicket', TripTicketSchema),
     Notification: mongoose.models.Notification || mongoose.model('Notification', NotificationSchema),
     LostFound: mongoose.models.LostFound || mongoose.model('LostFound', LostFoundSchema),
     Feedback: mongoose.models.Feedback || mongoose.model('Feedback', FeedbackSchema)
