@@ -3,7 +3,7 @@
  * Handles route lookup, search, and detailed route data retrieval for the View/Search Routes feature
  */
 
-const { Route, Stop } = require('../models/models');
+const { Route, Stop, Schedule } = require('../models/models');
 const {
     getFareMatrix,
     estimateSingleRideFare,
@@ -108,19 +108,26 @@ const getRouteDetail = async (req, res) => {
 
         // Transform stops data to ensure GeoJSON format compatibility
         if (route.stops && Array.isArray(route.stops)) {
-            route.stops = route.stops.map(stop => ({
-                ...stop,
-                stopId: {
-                    ...stop.stopId,
-                    // Fallback for lat/lng if not in GeoJSON format
-                    lat: stop.stopId.location?.coordinates?.[1] || stop.stopId.lat,
-                    lng: stop.stopId.location?.coordinates?.[0] || stop.stopId.lng,
-                    location: stop.stopId.location || {
-                        type: 'Point',
-                        coordinates: [stop.stopId.lng || 108.206230, stop.stopId.lat || 16.047079]
-                    }
-                }
-            }));
+            route.stops = route.stops
+                .map(stop => {
+                    const stopDoc = stop?.stopId && typeof stop.stopId === 'object' ? stop.stopId : null;
+                    if (!stopDoc) return null;
+
+                    return {
+                        ...stop,
+                        stopId: {
+                            ...stopDoc,
+                            // Fallback for lat/lng if not in GeoJSON format
+                            lat: stopDoc.location?.coordinates?.[1] || stopDoc.lat,
+                            lng: stopDoc.location?.coordinates?.[0] || stopDoc.lng,
+                            location: stopDoc.location || {
+                                type: 'Point',
+                                coordinates: [stopDoc.lng || 108.206230, stopDoc.lat || 16.047079]
+                            }
+                        }
+                    };
+                })
+                .filter(Boolean);
         }
 
         res.json({
@@ -206,8 +213,86 @@ const getRouteGeoJSON = async (req, res) => {
     }
 };
 
+function getLoadMeta(schedule) {
+    const capacity = Math.max(1, Number(schedule.busId?.capacity || 45));
+    const passengerCount = Math.max(0, Number(schedule.passengerCount || 0));
+    const occupancyPercentage = Math.min(100, Math.round((passengerCount / capacity) * 100));
+    const loadStatus = String(schedule.loadStatus || '').toUpperCase();
+
+    if (loadStatus === 'FULL' || occupancyPercentage >= 90) {
+        return { occupancyPercentage, loadColor: '#dc2626' };
+    }
+    if (loadStatus === 'CROWDED' || occupancyPercentage >= 70) {
+        return { occupancyPercentage, loadColor: '#f59e0b' };
+    }
+    if (loadStatus === 'MODERATE' || occupancyPercentage >= 40) {
+        return { occupancyPercentage, loadColor: '#3b82f6' };
+    }
+    return { occupancyPercentage, loadColor: '#16a34a' };
+}
+
+const getRouteLiveVehicles = async (req, res) => {
+    try {
+        const { routeId } = req.params;
+        const now = new Date();
+        const start = new Date(now);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(now);
+        end.setHours(23, 59, 59, 999);
+
+        const schedules = await Schedule.find({
+            routeId,
+            date: { $gte: start, $lte: end },
+            archived: { $ne: true },
+            status: { $in: ['SCHEDULED', 'IN_PROGRESS'] }
+        })
+            .populate('routeId', 'routeNumber name')
+            .populate('busId', 'licensePlate capacity')
+            .populate('driverId', 'fullName')
+            .lean();
+
+        const vehicles = schedules
+            .filter((schedule) =>
+                Number.isFinite(Number(schedule.currentLocation?.lat)) &&
+                Number.isFinite(Number(schedule.currentLocation?.lng))
+            )
+            .map((schedule) => {
+                const { occupancyPercentage, loadColor } = getLoadMeta(schedule);
+                return {
+                    scheduleId: String(schedule._id),
+                    routeId: String(schedule.routeId?._id || routeId),
+                    routeNumber: schedule.routeId?.routeNumber || '',
+                    routeName: schedule.routeId?.name || '',
+                    licensePlate: schedule.busId?.licensePlate || '',
+                    capacity: Number(schedule.busId?.capacity || 45),
+                    passengerCount: Number(schedule.passengerCount || 0),
+                    occupancyPercentage,
+                    loadColor,
+                    loadStatus: schedule.loadStatus || 'NORMAL',
+                    driverName: schedule.driverId?.fullName || '',
+                    currentLocation: schedule.currentLocation || null
+                };
+            })
+            .sort((a, b) => new Date(b.currentLocation?.updatedAt || 0) - new Date(a.currentLocation?.updatedAt || 0));
+
+        res.json({
+            ok: true,
+            vehicles,
+            lastUpdatedAt: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Error fetching live vehicles:', error);
+        res.status(500).json({
+            ok: false,
+            message: 'Lỗi khi tải dữ liệu xe đang chạy',
+            vehicles: []
+        });
+    }
+};
+
 module.exports = {
     getAllRoutes,
     getRouteDetail,
-    getRouteGeoJSON
+    getRouteGeoJSON,
+    getRouteLiveVehicles
 };

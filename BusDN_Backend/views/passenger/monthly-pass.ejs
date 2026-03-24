@@ -549,12 +549,9 @@
                 const start = selected.dataset.start || "";
                 const end = selected.dataset.end || "";
                 const originalPrice = Number(selected.dataset.price || 0);
-                const discountRate = Number(selected.dataset.discountRate || 0);
-                const discountAmount = Math.round(originalPrice * discountRate);
-                const finalPrice = Math.max(0, originalPrice - discountAmount);
 
                 if (selectedRouteText) selectedRouteText.textContent = `${routeNumber} - ${routeName}`;
-                renderPrice(price);
+                renderPrice(originalPrice);
                 if (routeInfoTitle) routeInfoTitle.textContent = `${routeNumber} - ${routeName}`;
                 if (routeInfoDesc) routeInfoDesc.textContent = description;
                 if (routeInfoTime) routeInfoTime.textContent = (start && end) ? `Giờ hoạt động: ${start} - ${end}` : "";

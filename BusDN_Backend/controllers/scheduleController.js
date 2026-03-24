@@ -22,6 +22,47 @@ function emitScheduleChange(action, scheduleDoc) {
     if (cId) io.to(`user:${cId}`).emit('schedule:changed', payload);
 }
 
+function emitTrackingUpdate(scheduleDoc) {
+    const io = getIO();
+    if (!io) return;
+    const routeId = String(scheduleDoc.routeId?._id || scheduleDoc.routeId || '');
+    io.to('admins').emit('tracking:updated', {
+        scheduleId: String(scheduleDoc._id),
+        routeId,
+        busId: String(scheduleDoc.busId?._id || scheduleDoc.busId || ''),
+        currentLocation: scheduleDoc.currentLocation || null,
+        passengerCount: Number(scheduleDoc.passengerCount || 0),
+        loadStatus: scheduleDoc.loadStatus || 'NORMAL',
+        trackingActive: Boolean(scheduleDoc.trackingActive)
+    });
+    if (routeId) {
+        io.to(`route:${routeId}`).emit('tracking:route-update', {
+            routeId,
+            scheduleId: String(scheduleDoc._id),
+            trackingActive: Boolean(scheduleDoc.trackingActive),
+            updatedAt: scheduleDoc.currentLocation?.updatedAt || new Date().toISOString()
+        });
+    }
+}
+
+function canControlSchedule(scheduleDoc, userId) {
+    const id = String(userId || '');
+    return (
+        (scheduleDoc.driverId && String(scheduleDoc.driverId) === id) ||
+        (scheduleDoc.conductorId && String(scheduleDoc.conductorId) === id)
+    );
+}
+
+function deriveLoadStatus(passengerCount, capacity) {
+    const cap = Math.max(1, Number(capacity || 45));
+    const pax = Math.max(0, Number(passengerCount || 0));
+    const pct = Math.min(100, Math.round((pax / cap) * 100));
+    if (pct >= 90) return 'FULL';
+    if (pct >= 70) return 'CROWDED';
+    if (pct >= 40) return 'MODERATE';
+    return 'NORMAL';
+}
+
 async function getBookedTripTicketUserIds(scheduleId) {
     const rows = await TripTicket.find({ scheduleId, status: 'BOOKED' }).select('userId').lean();
     return [...new Set(rows.map((r) => String(r.userId)))];
@@ -877,13 +918,12 @@ exports.startTrip = async (req, res) => {
         if (s.status === 'COMPLETED' || s.status === 'CANCELLED') {
             return res.status(400).json({ ok: false, message: 'Chuyến đã kết thúc hoặc hủy' });
         }
-        const isDriver = s.driverId && String(s.driverId) === String(req.user.userId);
-        const isConductor = s.conductorId && String(s.conductorId) === String(req.user.userId);
-        if (!isDriver && !isConductor) return res.status(403).json({ ok: false, message: 'Không có quyền bắt đầu chuyến này' });
+        if (!canControlSchedule(s, req.user.userId)) return res.status(403).json({ ok: false, message: 'Không có quyền bắt đầu chuyến này' });
         if (!s.actualStart) {
             s.actualStart = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
         }
         s.status = 'IN_PROGRESS';
+        s.trackingActive = true;
         await s.save();
         emitScheduleChange('in_progress', s);
         return res.json({ ok: true, message: 'Đã bắt đầu chuyến', schedule: s });
@@ -892,22 +932,117 @@ exports.startTrip = async (req, res) => {
     }
 };
 
+exports.finishTrip = async (req, res) => {
+    try {
+        const { scheduleId, actualEnd } = req.body;
+        if (!scheduleId) return res.status(400).json({ ok: false, message: 'Thiếu scheduleId' });
+        const s = await Schedule.findById(scheduleId);
+        if (!s) return res.status(404).json({ ok: false, message: 'Không tìm thấy chuyến' });
+        if (!canControlSchedule(s, req.user.userId)) return res.status(403).json({ ok: false, message: 'Không có quyền kết thúc chuyến này' });
+        if (s.status === 'CANCELLED') return res.status(400).json({ ok: false, message: 'Chuyến đã bị hủy' });
+
+        if (!s.actualStart) {
+            s.actualStart = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+        }
+        s.actualEnd = actualEnd || new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+        s.status = 'COMPLETED';
+        s.trackingActive = false;
+        await s.save();
+        emitScheduleChange('completed', s);
+        emitTrackingUpdate(s);
+        return res.json({ ok: true, message: 'Đã kết thúc chuyến', schedule: s });
+    } catch (err) {
+        return res.status(500).json({ ok: false, message: 'Lỗi server' });
+    }
+};
+
+exports.updateTrackingLocation = async (req, res) => {
+    try {
+        const { scheduleId, lat, lng, accuracy, speed, heading } = req.body;
+        if (!scheduleId || lat == null || lng == null) {
+            return res.status(400).json({ ok: false, message: 'Thiếu scheduleId hoặc tọa độ GPS' });
+        }
+
+        const schedule = await Schedule.findById(scheduleId)
+            .populate('busId', 'licensePlate capacity')
+            .populate('routeId', 'routeNumber name');
+        if (!schedule) return res.status(404).json({ ok: false, message: 'Không tìm thấy chuyến' });
+        if (!canControlSchedule(schedule, req.user.userId)) {
+            return res.status(403).json({ ok: false, message: 'Không có quyền cập nhật vị trí chuyến này' });
+        }
+
+        schedule.currentLocation = {
+            lat: Number(lat),
+            lng: Number(lng),
+            accuracy: accuracy == null ? null : Number(accuracy),
+            speed: speed == null ? null : Number(speed),
+            heading: heading == null ? null : Number(heading),
+            updatedAt: new Date()
+        };
+        schedule.trackingActive = true;
+        if (!schedule.actualStart) {
+            schedule.actualStart = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+        }
+        if (schedule.status === 'SCHEDULED') {
+            schedule.status = 'IN_PROGRESS';
+        }
+        await schedule.save();
+        emitTrackingUpdate(schedule);
+        return res.json({ ok: true, message: 'Đã cập nhật vị trí', schedule });
+    } catch (err) {
+        console.error('updateTrackingLocation error:', err);
+        return res.status(500).json({ ok: false, message: 'Lỗi server' });
+    }
+};
+
+exports.updateLoadStatus = async (req, res) => {
+    try {
+        const { scheduleId, passengerCount } = req.body;
+        if (!scheduleId) return res.status(400).json({ ok: false, message: 'Thiếu scheduleId' });
+
+        const schedule = await Schedule.findById(scheduleId).populate('busId', 'capacity');
+        if (!schedule) return res.status(404).json({ ok: false, message: 'Không tìm thấy chuyến' });
+        if (!canControlSchedule(schedule, req.user.userId)) {
+            return res.status(403).json({ ok: false, message: 'Không có quyền cập nhật tải trọng chuyến này' });
+        }
+
+        const capacity = Number(schedule.busId?.capacity || 45);
+        const normalizedPassengerCount = Math.max(0, Math.min(Number(passengerCount || 0), capacity));
+        schedule.passengerCount = normalizedPassengerCount;
+        schedule.loadStatus = deriveLoadStatus(normalizedPassengerCount, capacity);
+        schedule.loadUpdatedAt = new Date();
+        await schedule.save();
+        emitTrackingUpdate(schedule);
+
+        return res.json({ ok: true, message: 'Đã cập nhật tải trọng xe', schedule });
+    } catch (err) {
+        console.error('updateLoadStatus error:', err);
+        return res.status(500).json({ ok: false, message: 'Lỗi server' });
+    }
+};
+
 exports.updateTripLog = async (req, res) => {
     try {
         const { id } = req.params;
         const { actualStart, actualEnd, passengerCount, revenue, notes } = req.body;
-        const updated = await Schedule.findByIdAndUpdate(id, {
-            actualStart, actualEnd,
-            passengerCount: Number(passengerCount) || 0,
-            revenue: Number(revenue) || 0,
-            notes,
-            status: 'COMPLETED',
-        }, { new: true })
+        const updatePayload = {
+            revenue: Number(revenue) || 0
+        };
+        if (actualStart !== undefined) updatePayload.actualStart = actualStart;
+        if (actualEnd !== undefined) updatePayload.actualEnd = actualEnd;
+        if (passengerCount !== undefined) updatePayload.passengerCount = Number(passengerCount) || 0;
+        if (notes !== undefined) updatePayload.notes = notes;
+        if (actualEnd) {
+            updatePayload.status = 'COMPLETED';
+            updatePayload.trackingActive = false;
+        }
+        const updated = await Schedule.findByIdAndUpdate(id, updatePayload, { new: true })
             .populate('driverId', 'fullName')
             .populate('busId', 'licensePlate capacity')
             .populate('routeId', 'routeNumber name');
         if (!updated) return res.status(404).json({ ok: false, message: 'Không tìm thấy chuyến xe' });
-        emitScheduleChange('completed', updated);
+        emitScheduleChange(actualEnd ? 'completed' : 'updated', updated);
+        emitTrackingUpdate(updated);
         res.json({ ok: true, message: 'Đã cập nhật nhật ký chuyến', schedule: updated });
     } catch (err) {
         res.status(500).json({ ok: false, message: 'Lỗi server' });

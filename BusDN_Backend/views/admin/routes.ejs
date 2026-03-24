@@ -90,6 +90,9 @@ const stopLabel = (stop) => {
         margin: 0;
         display: grid;
         gap: 10px;
+        max-height: 280px;
+        overflow-y: auto;
+        padding-right: 4px;
     }
 
     .route-builder-item {
@@ -136,6 +139,38 @@ const stopLabel = (stop) => {
     .route-point-card .label {
         color: #6c757d;
         font-size: 0.85rem;
+    }
+
+    .route-modal .modal-content {
+        max-height: calc(100vh - 2rem);
+    }
+
+    .route-modal .modal-body {
+        overflow-y: auto;
+        max-height: calc(100vh - 180px);
+    }
+
+    .route-modal .modal-footer {
+        position: sticky;
+        bottom: 0;
+        z-index: 2;
+        background: #fff;
+        border-top: 1px solid #dee2e6;
+        box-shadow: 0 -6px 16px rgba(15, 23, 42, 0.08);
+    }
+
+    .route-modal.route-modal-edit .modal-dialog {
+        max-width: 960px;
+    }
+
+    @media (max-width: 991.98px) {
+        .route-points {
+            grid-template-columns: 1fr;
+        }
+
+        .route-builder-list {
+            max-height: 220px;
+        }
     }
 </style>
 
@@ -302,7 +337,7 @@ const stopLabel = (stop) => {
     </div>
 </div>
 
-<div class="modal fade" id="createRouteModal" tabindex="-1" aria-labelledby="createRouteModalLabel" aria-hidden="true">
+    <div class="modal fade route-modal" id="createRouteModal" tabindex="-1" aria-labelledby="createRouteModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content">
             <form action="/admin/routes/create" method="POST" class="js-route-form">
@@ -372,7 +407,7 @@ const stopLabel = (stop) => {
 </div>
 
 <% routeList.forEach((route, idx) => { %>
-    <div class="modal fade" id="detailRouteModal-<%= idx %>" tabindex="-1" aria-labelledby="detailRouteModalLabel-<%= idx %>" aria-hidden="true">
+    <div class="modal fade route-modal" id="detailRouteModal-<%= idx %>" tabindex="-1" aria-labelledby="detailRouteModalLabel-<%= idx %>" aria-hidden="true">
         <div class="modal-dialog modal-xl modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
@@ -452,8 +487,8 @@ const stopLabel = (stop) => {
 <% }) %>
 
 <% routeList.forEach((route, idx) => { %>
-    <div class="modal fade" id="editRouteModal-<%= idx %>" tabindex="-1" aria-labelledby="editRouteModalLabel-<%= idx %>" aria-hidden="true">
-        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal fade route-modal route-modal-edit" id="editRouteModal-<%= idx %>" tabindex="-1" aria-labelledby="editRouteModalLabel-<%= idx %>" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
             <div class="modal-content">
                 <form action="/admin/routes/<%= route._id %>/update" method="POST" class="js-route-form">
                     <div class="modal-header">

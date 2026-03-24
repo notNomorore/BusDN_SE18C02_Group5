@@ -201,6 +201,21 @@ const ScheduleSchema = new mongoose.Schema({
     actualStart: { type: String, default: null },
     actualEnd: { type: String, default: null },
     passengerCount: { type: Number, default: 0 },
+    loadStatus: {
+        type: String,
+        enum: ['NORMAL', 'MODERATE', 'CROWDED', 'FULL'],
+        default: 'NORMAL'
+    },
+    loadUpdatedAt: { type: Date, default: null },
+    trackingActive: { type: Boolean, default: false },
+    currentLocation: {
+        lat: { type: Number, default: null },
+        lng: { type: Number, default: null },
+        accuracy: { type: Number, default: null },
+        speed: { type: Number, default: null },
+        heading: { type: Number, default: null },
+        updatedAt: { type: Date, default: null }
+    },
     revenue: { type: Number, default: 0 },
     notes: { type: String, default: '' }
 }, { timestamps: true });

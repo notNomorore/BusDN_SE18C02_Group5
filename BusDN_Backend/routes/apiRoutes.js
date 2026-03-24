@@ -1,11 +1,21 @@
-const express = require('express');
+﻿const express = require('express');
 const router = express.Router();
 const authMiddleware = require('../middleware/authMiddleware');
-const { User, Route, Stop, PriorityProfile, MonthlyPass, WalletTransaction, Schedule, Bus, LostFound, Notification, Feedback, TripTicket } = require('../models/models');
+const { User, Route, Stop, PriorityProfile, MonthlyPass, WalletTransaction, Schedule, Bus, LostFound, Notification, Feedback, TripTicket, Promotion } = require('../models/models');
 const bcrypt = require('bcryptjs');
-const { emitPendingPriorityCount, applyPriorityDiscount, applyPriorityExpiryForUser } = require('../utils/priorityUtils');
+const crypto = require('crypto');
+const querystring = require('querystring');
+const { emitPendingPriorityCount, applyPriorityExpiryForUser } = require('../utils/priorityUtils');
 const scheduleController = require('../controllers/scheduleController'); // NEW
 const { getIO } = require('../config/socket');
+const {
+    getFareMatrix,
+    getPriorityDiscountPercentByCategory,
+    resolveMonthlyPassBasePrice,
+    estimateSingleRideFare,
+    upsertFareMatrix,
+    PASS_TYPE: FARE_PASS_TYPE
+} = require('../services/fareMatrixService');
 
 function makePassCode(year, month, userId) {
     const mm = String(month).padStart(2, "0");
@@ -19,6 +29,368 @@ function getMonthDateRange(year, month) {
     const validTo = new Date(year, month, 0, 23, 59, 59, 999);
     return { validFrom, validTo };
 }
+
+const PASS_TYPE = {
+    SINGLE_ROUTE: 'SINGLE_ROUTE',
+    INTER_ROUTE: 'INTER_ROUTE'
+};
+
+const normalizePromoCode = (value) => String(value || '').trim().toUpperCase();
+const cleanText = (value) => (typeof value === 'string' ? value.trim() : '');
+const PAYMENT_METHOD = {
+    VNPAY: 'VNPAY',
+    MOMO: 'MOMO'
+};
+
+const ensureAdminApi = async (req, res) => {
+    const adminUser = await User.findById(req.user.userId).select('role');
+    if (!adminUser || adminUser.role !== 'ADMIN') {
+        res.status(403).json({ ok: false, message: 'Forbidden' });
+        return null;
+    }
+    return adminUser;
+};
+
+const ALLOWED_PROMOTION_STATUS = ['DRAFT', 'SCHEDULED', 'ACTIVE', 'ENDED', 'CANCELLED'];
+const ALLOWED_PROMOTION_SCOPE = ['ALL', 'SINGLE_ROUTE', 'INTER_ROUTE'];
+const ALLOWED_PROMOTION_DISCOUNT_TYPE = ['PERCENT', 'FIXED'];
+
+const parseApiDateTime = (value) => {
+    const raw = cleanText(value);
+    if (!raw) return null;
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const parseApiNumberOrNull = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+const toPromotionLifecycleStatus = (requestedStatus, startAt, endAt, now = new Date()) => {
+    if (requestedStatus === 'DRAFT' || requestedStatus === 'CANCELLED' || requestedStatus === 'ENDED') {
+        return requestedStatus;
+    }
+    if (endAt <= now) return 'ENDED';
+    if (startAt > now) return 'SCHEDULED';
+    return 'ACTIVE';
+};
+
+const mapPromotionPayloadFromApi = (body = {}) => {
+    let routeId = cleanText(body.routeId);
+    if (!routeId) routeId = null;
+
+    return {
+        code: cleanText(body.code).toUpperCase(),
+        name: cleanText(body.name),
+        description: cleanText(body.description),
+        discountType: cleanText(body.discountType).toUpperCase() || 'PERCENT',
+        discountValue: parseApiNumberOrNull(body.discountValue),
+        maxDiscountValue: parseApiNumberOrNull(body.maxDiscountValue),
+        minOrderValue: parseApiNumberOrNull(body.minOrderValue) ?? 0,
+        applyScope: cleanText(body.applyScope).toUpperCase() || 'ALL',
+        routeId,
+        startAt: parseApiDateTime(body.startAt),
+        endAt: parseApiDateTime(body.endAt),
+        status: cleanText(body.status).toUpperCase() || 'DRAFT',
+        usageLimitTotal: parseApiNumberOrNull(body.usageLimitTotal),
+        usageLimitPerUser: parseApiNumberOrNull(body.usageLimitPerUser) ?? 1
+    };
+};
+
+const parsePaymentMethod = (value) => (value === PAYMENT_METHOD.MOMO ? PAYMENT_METHOD.MOMO : PAYMENT_METHOD.VNPAY);
+
+const buildBaseUrl = (req) => process.env.APP_BASE_URL || `${req.protocol}://${req.get('host')}`;
+
+const toOrderCode = () => {
+    const now = Date.now();
+    const rnd = Math.floor(Math.random() * 1000);
+    return Number(`${String(now).slice(-9)}${String(rnd).padStart(3, '0')}`);
+};
+
+const sortObject = (obj) => {
+    const sorted = {};
+    Object.keys(obj).sort().forEach((key) => {
+        sorted[key] = obj[key];
+    });
+    return sorted;
+};
+
+const vnpEncode = (value) => encodeURIComponent(value)
+    .replace(/%20/g, '+')
+    .replace(/!/g, '%21')
+    .replace(/\(/g, '%28')
+    .replace(/\)/g, '%29')
+    .replace(/'/g, '%27');
+
+const signVnpParams = (params, secret) => {
+    const sorted = sortObject(params);
+    const signData = querystring.stringify(sorted, '&', '=', {
+        encodeURIComponent: vnpEncode
+    });
+    return crypto.createHmac('sha512', secret).update(signData, 'utf-8').digest('hex');
+};
+
+const buildVnpUrl = (baseUrl, params, secret) => {
+    const sorted = sortObject(params);
+    const secureHash = signVnpParams(sorted, secret);
+    const query = querystring.stringify(sorted, '&', '=', {
+        encodeURIComponent: vnpEncode
+    });
+    return `${baseUrl}?${query}&vnp_SecureHash=${secureHash}`;
+};
+
+const formatDateVnp = (date = new Date()) => {
+    const vn = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }));
+    const yyyy = vn.getFullYear();
+    const MM = String(vn.getMonth() + 1).padStart(2, '0');
+    const dd = String(vn.getDate()).padStart(2, '0');
+    const HH = String(vn.getHours()).padStart(2, '0');
+    const mm = String(vn.getMinutes()).padStart(2, '0');
+    const ss = String(vn.getSeconds()).padStart(2, '0');
+    return `${yyyy}${MM}${dd}${HH}${mm}${ss}`;
+};
+
+const addMinutesVnp = (date = new Date(), minutes = 15) => formatDateVnp(new Date(date.getTime() + minutes * 60 * 1000));
+
+const getClientIp = (req) => {
+    const rawIp = (
+        req.headers['x-forwarded-for']?.split(',')[0]?.trim()
+        || req.connection?.remoteAddress
+        || req.socket?.remoteAddress
+        || req.ip
+        || '127.0.0.1'
+    );
+    if (!rawIp || rawIp === '::1' || rawIp === '::') return '127.0.0.1';
+    if (String(rawIp).startsWith('::ffff:')) return String(rawIp).replace('::ffff:', '');
+    return String(rawIp);
+};
+
+const getVnpayBaseConfig = (req) => ({
+    tmnCode: process.env.VNPAY_TMN_CODE || '',
+    hashSecret: process.env.VNPAY_HASH_SECRET || '',
+    vnpUrl: process.env.VNPAY_URL || 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
+    returnUrl: process.env.VNPAY_MONTHLY_RETURN_URL || `${buildBaseUrl(req)}/passenger/passes/monthly/vnpay-return`
+});
+
+const signMomoRaw = (rawSignature, accessKey, secretKey) => crypto.createHmac('sha256', secretKey).update(rawSignature).digest('hex');
+
+const createMomoPayment = async (payload) => {
+    const endpoint = process.env.MOMO_ENDPOINT || 'https://test-payment.momo.vn/v2/gateway/api/create';
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    const json = await response.json();
+    if (!response.ok || Number(json?.resultCode) !== 0 || !json?.payUrl) {
+        throw new Error(`Create MoMo link failed: ${JSON.stringify(json)}`);
+    }
+    return json;
+};
+
+const validatePromotionPayloadForApi = async (payload, mode = 'create') => {
+    const errors = [];
+    const now = new Date();
+
+    if (!payload.code) errors.push('Mã khuyến mãi là bắt buộc.');
+    if (!payload.name) errors.push('Tên chương trình là bắt buộc.');
+    if (!ALLOWED_PROMOTION_DISCOUNT_TYPE.includes(payload.discountType)) {
+        errors.push('Loại giảm giá không hợp lệ.');
+    }
+    if (!ALLOWED_PROMOTION_SCOPE.includes(payload.applyScope)) {
+        errors.push('Phạm vi áp dụng không hợp lệ.');
+    }
+    if (!ALLOWED_PROMOTION_STATUS.includes(payload.status)) {
+        errors.push('Trạng thái chương trình không hợp lệ.');
+    }
+    if (!payload.startAt || !payload.endAt) {
+        errors.push('Thời gian bắt đầu và kết thúc là bắt buộc.');
+    } else if (payload.endAt <= payload.startAt) {
+        errors.push('Thời gian kết thúc phải lớn hơn thời gian bắt đầu.');
+    }
+    if (!Number.isFinite(payload.discountValue) || payload.discountValue <= 0) {
+        errors.push('Giá trị giảm phải lớn hơn 0.');
+    }
+    if (payload.discountType === 'PERCENT' && payload.discountValue > 100) {
+        errors.push('Giảm theo phần trăm không được vượt quá 100.');
+    }
+    if (payload.maxDiscountValue !== null && (!Number.isFinite(payload.maxDiscountValue) || payload.maxDiscountValue < 0)) {
+        errors.push('Trần giảm tối đa không hợp lệ.');
+    }
+    if (!Number.isFinite(payload.minOrderValue) || payload.minOrderValue < 0) {
+        errors.push('Giá trị đơn tối thiểu không hợp lệ.');
+    }
+    if (payload.usageLimitTotal !== null && (!Number.isInteger(payload.usageLimitTotal) || payload.usageLimitTotal < 1)) {
+        errors.push('Giới hạn lượt dùng tổng phải là số nguyên dương.');
+    }
+    if (!Number.isInteger(payload.usageLimitPerUser) || payload.usageLimitPerUser < 1) {
+        errors.push('Giới hạn lượt dùng mỗi người phải là số nguyên dương.');
+    }
+
+    if (payload.applyScope === 'SINGLE_ROUTE') {
+        if (!payload.routeId) {
+            errors.push('Phải chọn tuyến khi áp dụng cho vé đơn tuyến.');
+        } else {
+            const route = await Route.findOne({ _id: payload.routeId, status: 'ACTIVE' }).lean();
+            if (!route) errors.push('Tuyến áp dụng không tồn tại hoặc không hoạt động.');
+        }
+    } else {
+        payload.routeId = null;
+    }
+
+    if (mode === 'create' && (payload.status === 'ENDED' || payload.status === 'CANCELLED')) {
+        errors.push('Không thể tạo mới với trạng thái ENDED/CANCELLED.');
+    }
+
+    return errors;
+};
+
+const calcPromotionDiscount = (orderAmount, promotion) => {
+    const amount = Number(orderAmount || 0);
+    if (!Number.isFinite(amount) || amount <= 0 || !promotion) return 0;
+
+    let discount = 0;
+    if (promotion.discountType === 'PERCENT') {
+        discount = Math.round((amount * Number(promotion.discountValue || 0)) / 100);
+    } else {
+        discount = Math.round(Number(promotion.discountValue || 0));
+    }
+
+    if (Number.isFinite(promotion.maxDiscountValue) && Number(promotion.maxDiscountValue) >= 0) {
+        discount = Math.min(discount, Number(promotion.maxDiscountValue));
+    }
+
+    return Math.max(0, Math.min(discount, amount));
+};
+
+const getPriorityDiscountInfo = async (userId, fareMatrix) => {
+    const fallback = { eligible: false, discountPercent: 0 };
+
+    try {
+        const now = new Date();
+        const profile = await PriorityProfile.findOne({
+            userId,
+            status: { $in: ['approved', 'APPROVED'] },
+            $or: [{ expiryDate: null }, { expiryDate: { $gte: now } }]
+        })
+            .sort({ updatedAt: -1, createdAt: -1 })
+            .lean();
+
+        if (profile) {
+            return {
+                eligible: true,
+                discountPercent: getPriorityDiscountPercentByCategory(profile.category, fareMatrix)
+            };
+        }
+
+        const user = await User.findById(userId).select('priorityProfile isPriorityGroup').lean();
+        const legacyStatus = String(user?.priorityProfile?.status || '').toUpperCase();
+        const legacyExpiry = user?.priorityProfile?.expiryDate ? new Date(user.priorityProfile.expiryDate) : null;
+        const legacyActive = !legacyExpiry || legacyExpiry >= now;
+
+        if (legacyStatus === 'APPROVED' && legacyActive) {
+            return {
+                eligible: true,
+                discountPercent: getPriorityDiscountPercentByCategory('other', fareMatrix)
+            };
+        }
+
+        if (user?.isPriorityGroup) {
+            return { eligible: true, discountPercent: 20 };
+        }
+
+        return fallback;
+    } catch (error) {
+        return fallback;
+    }
+};
+
+const validatePromotionForMonthlyPass = async ({
+    promoCode,
+    userId,
+    passType,
+    routeId,
+    baseForPromo,
+    now
+}) => {
+    if (!promoCode) {
+        return { promotion: null, discountAmount: 0 };
+    }
+
+    const promotion = await Promotion.findOne({ code: promoCode }).lean();
+    if (!promotion) throw new Error('MÃ£ giáº£m giÃ¡ khÃ´ng tá»“n táº¡i.');
+    if (promotion.status !== 'ACTIVE') throw new Error('MÃ£ giáº£m giÃ¡ chÆ°a hoáº·c khÃ´ng cÃ²n hoáº¡t Ä‘á»™ng.');
+
+    const startAt = promotion.startAt ? new Date(promotion.startAt) : null;
+    const endAt = promotion.endAt ? new Date(promotion.endAt) : null;
+    if (!startAt || !endAt || now < startAt || now > endAt) {
+        throw new Error('MÃ£ giáº£m giÃ¡ Ä‘Ã£ háº¿t háº¡n hoáº·c chÆ°a Ä‘áº¿n thá»i gian Ã¡p dá»¥ng.');
+    }
+
+    if (promotion.minOrderValue && baseForPromo < Number(promotion.minOrderValue)) {
+        throw new Error(`ÄÆ¡n hÃ ng chÆ°a Ä‘áº¡t giÃ¡ trá»‹ tá»‘i thiá»ƒu ${Number(promotion.minOrderValue).toLocaleString('vi-VN')} Ä‘.`);
+    }
+
+    if (promotion.applyScope === 'INTER_ROUTE' && passType !== PASS_TYPE.INTER_ROUTE) {
+        throw new Error('Mã giảm giá chỉ áp dụng cho vé liên tuyến.');
+    }
+
+    if (promotion.applyScope === 'SINGLE_ROUTE') {
+        if (passType !== PASS_TYPE.SINGLE_ROUTE) {
+            throw new Error('Mã giảm giá chỉ áp dụng cho vé đơn tuyến.');
+        }
+        if (String(promotion.routeId || '') !== String(routeId || '')) {
+            throw new Error('Mã giảm giá không áp dụng cho tuyến đã chọn.');
+        }
+    }
+
+    if (promotion.usageLimitPerUser) {
+        const usedByUser = await WalletTransaction.countDocuments({
+            userId,
+            txnType: 'MONTHLY_PASS',
+            status: 'SUCCESS',
+            'rawReturn.promotionId': String(promotion._id)
+        });
+        if (usedByUser >= Number(promotion.usageLimitPerUser)) {
+            throw new Error('Báº¡n Ä‘Ã£ dÃ¹ng háº¿t lÆ°á»£t cá»§a mÃ£ giáº£m giÃ¡ nÃ y.');
+        }
+    }
+
+    if (promotion.usageLimitTotal && Number(promotion.usageCount || 0) >= Number(promotion.usageLimitTotal)) {
+        throw new Error('MÃ£ giáº£m giÃ¡ Ä‘Ã£ háº¿t lÆ°á»£t sá»­ dá»¥ng.');
+    }
+
+    const discountAmount = calcPromotionDiscount(baseForPromo, promotion);
+    if (discountAmount <= 0) {
+        throw new Error('MÃ£ giáº£m giÃ¡ khÃ´ng Ã¡p dá»¥ng cho Ä‘Æ¡n hÃ ng hiá»‡n táº¡i.');
+    }
+
+    return { promotion, discountAmount };
+};
+
+const consumePromotionUsage = async (promotionId) => {
+    if (!promotionId) return;
+
+    const promotion = await Promotion.findById(promotionId).lean();
+    if (!promotion) throw new Error('MÃ£ giáº£m giÃ¡ khÃ´ng tá»“n táº¡i.');
+
+    const filter = { _id: promotionId, status: 'ACTIVE' };
+    if (promotion.usageLimitTotal) {
+        filter.usageCount = { $lt: Number(promotion.usageLimitTotal) };
+    }
+
+    const updated = await Promotion.findOneAndUpdate(
+        filter,
+        { $inc: { usageCount: 1 } },
+        { new: true }
+    ).lean();
+
+    if (!updated) {
+        throw new Error('MÃ£ giáº£m giÃ¡ Ä‘Ã£ háº¿t lÆ°á»£t sá»­ dá»¥ng.');
+    }
+};
 
 /**
  * API Routes for Mobile Clients (Expo/React Native)
@@ -38,7 +410,7 @@ router.get('/user/profile', authMiddleware, async (req, res) => {
     try {
         const user = await User.findById(req.user.userId).select('-password');
         if (!user) {
-            return res.status(404).json({ ok: false, message: 'Người dùng không tồn tại' });
+            return res.status(404).json({ ok: false, message: 'NgÆ°á»i dÃ¹ng khÃ´ng tá»“n táº¡i' });
         }
 
         res.json({
@@ -59,7 +431,7 @@ router.get('/user/profile', authMiddleware, async (req, res) => {
         });
     } catch (error) {
         console.error('Error fetching profile:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -75,7 +447,7 @@ router.post('/user/update-profile', authMiddleware, async (req, res) => {
         const user = await User.findById(req.user.userId);
 
         if (!user) {
-            return res.status(404).json({ ok: false, message: 'Người dùng không tồn tại' });
+            return res.status(404).json({ ok: false, message: 'NgÆ°á»i dÃ¹ng khÃ´ng tá»“n táº¡i' });
         }
 
         if (fullName) user.fullName = fullName;
@@ -86,7 +458,7 @@ router.post('/user/update-profile', authMiddleware, async (req, res) => {
 
         res.json({
             ok: true,
-            message: 'Cập nhật hồ sơ thành công',
+            message: 'Cáº­p nháº­t há»“ sÆ¡ thÃ nh cÃ´ng',
             user: {
                 id: user._id,
                 fullName: user.fullName,
@@ -97,7 +469,7 @@ router.post('/user/update-profile', authMiddleware, async (req, res) => {
         });
     } catch (error) {
         console.error('Error updating profile:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -113,17 +485,17 @@ router.post('/user/change-password', authMiddleware, async (req, res) => {
         const user = await User.findById(req.user.userId);
 
         if (!user) {
-            return res.status(404).json({ ok: false, message: 'Người dùng không tồn tại' });
+            return res.status(404).json({ ok: false, message: 'NgÆ°á»i dÃ¹ng khÃ´ng tá»“n táº¡i' });
         }
 
         // First-login flow: skip old password check
         if (!isFirstLogin) {
             if (!oldPassword) {
-                return res.status(400).json({ ok: false, message: 'Vui lòng nhập mật khẩu cũ' });
+                return res.status(400).json({ ok: false, message: 'Vui lÃ²ng nháº­p máº­t kháº©u cÅ©' });
             }
             const isMatch = await bcrypt.compare(oldPassword, user.password);
             if (!isMatch) {
-                return res.status(400).json({ ok: false, message: 'Mật khẩu cũ không đúng' });
+                return res.status(400).json({ ok: false, message: 'Máº­t kháº©u cÅ© khÃ´ng Ä‘Ãºng' });
             }
         }
 
@@ -132,10 +504,10 @@ router.post('/user/change-password', authMiddleware, async (req, res) => {
         user.isFirstLogin = false;
         await user.save();
 
-        res.json({ ok: true, message: 'Cập nhật mật khẩu thành công' });
+        res.json({ ok: true, message: 'Cáº­p nháº­t máº­t kháº©u thÃ nh cÃ´ng' });
     } catch (error) {
         console.error('Error changing password:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -155,7 +527,7 @@ router.post('/user/register-priority', authMiddleware, async (req, res) => {
         const user = await User.findById(req.user.userId);
 
         if (!user) {
-            return res.status(404).json({ ok: false, message: 'Người dùng không tồn tại' });
+            return res.status(404).json({ ok: false, message: 'NgÆ°á»i dÃ¹ng khÃ´ng tá»“n táº¡i' });
         }
 
         user.priorityProfile = {
@@ -189,12 +561,12 @@ router.post('/user/register-priority', authMiddleware, async (req, res) => {
 
         return res.json({
             ok: true,
-            message: 'Đơn đăng ký ưu tiên đang chờ xác nhận',
+            message: 'ÄÆ¡n Ä‘Äƒng kÃ½ Æ°u tiÃªn Ä‘ang chá» xÃ¡c nháº­n',
             priorityProfile: user.priorityProfile
         });
     } catch (error) {
         console.error('Error registering priority:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -213,7 +585,7 @@ router.get('/user/priority-status', authMiddleware, async (req, res) => {
         });
     } catch (error) {
         console.error('Error fetching priority status:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -311,7 +683,7 @@ router.get('/routes', async (req, res) => {
         });
     } catch (error) {
         console.error('Error fetching routes:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -326,7 +698,7 @@ router.get('/routes/:id', async (req, res) => {
             .populate('stops.stopId', 'name address lat lng isTerminal');
 
         if (!route) {
-            return res.status(404).json({ ok: false, message: 'Tuyến đường không tồn tại' });
+            return res.status(404).json({ ok: false, message: 'Tuyáº¿n Ä‘Æ°á»ng khÃ´ng tá»“n táº¡i' });
         }
 
         // Format stops for display
@@ -354,7 +726,7 @@ router.get('/routes/:id', async (req, res) => {
         });
     } catch (error) {
         console.error('Error fetching route detail:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -393,7 +765,7 @@ router.get('/stops', async (req, res) => {
         });
     } catch (error) {
         console.error('Error fetching stops:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -451,33 +823,34 @@ router.post('/routes/search', async (req, res) => {
         });
     } catch (error) {
         console.error('Error searching routes:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
 /**
  * GET /api/schedules/for-booking?routeId=&date=YYYY-MM-DD
- * Danh sách chuyến có thể mua vé lẻ (không lưu trữ, chưa hủy/kết thúc)
+ * Danh sÃ¡ch chuyáº¿n cÃ³ thá»ƒ mua vÃ© láº» (khÃ´ng lÆ°u trá»¯, chÆ°a há»§y/káº¿t thÃºc)
  * Auth: Required
  */
 router.get('/schedules/for-booking', authMiddleware, async (req, res) => {
     try {
         const { routeId, date } = req.query;
         if (!routeId || !date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) {
-            return res.status(400).json({ ok: false, message: 'Thiếu routeId hoặc date (YYYY-MM-DD)' });
+            return res.status(400).json({ ok: false, message: 'Thiáº¿u routeId hoáº·c date (YYYY-MM-DD)' });
         }
         const dayStart = new Date(`${date}T00:00:00.000Z`);
         const dayEnd = new Date(`${date}T23:59:59.999Z`);
         if (Number.isNaN(dayStart.getTime())) {
-            return res.status(400).json({ ok: false, message: 'Ngày không hợp lệ' });
+            return res.status(400).json({ ok: false, message: 'NgÃ y khÃ´ng há»£p lá»‡' });
         }
+        const { matrix: fareMatrix } = await getFareMatrix();
         const schedules = await Schedule.find({
             routeId,
             date: { $gte: dayStart, $lte: dayEnd },
             archived: { $ne: true },
             status: { $in: ['SCHEDULED', 'IN_PROGRESS'] }
         })
-            .populate('routeId', 'routeNumber name monthlyPassPrice')
+            .populate('routeId', 'routeNumber name monthlyPassPrice distance')
             .populate('busId', 'licensePlate capacity')
             .sort({ departureTime: 1, 'shiftTime.start': 1 })
             .lean();
@@ -491,18 +864,19 @@ router.get('/schedules/for-booking', authMiddleware, async (req, res) => {
                 shiftTime: s.shiftTime,
                 status: s.status,
                 routeId: s.routeId,
-                busId: s.busId
+                busId: s.busId,
+                estimatedFare: estimateSingleRideFare(Number(s.routeId?.distance || 0), fareMatrix)
             }))
         });
     } catch (error) {
         console.error('Error listing schedules for booking:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
 /**
  * GET /api/user/trip-tickets
- * Vé lẻ của user (gần đây)
+ * VÃ© láº» cá»§a user (gáº§n Ä‘Ã¢y)
  * Auth: Required
  */
 router.get('/user/trip-tickets', authMiddleware, async (req, res) => {
@@ -517,7 +891,7 @@ router.get('/user/trip-tickets', authMiddleware, async (req, res) => {
         res.json({ ok: true, tickets });
     } catch (error) {
         console.error('Error listing trip tickets:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -541,7 +915,7 @@ router.get('/user/wallet', authMiddleware, async (req, res) => {
         });
     } catch (error) {
         console.error('Error fetching wallet:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -557,11 +931,11 @@ router.post('/user/wallet/deposit', authMiddleware, async (req, res) => {
         const user = await User.findById(req.user.userId);
 
         if (!user) {
-            return res.status(404).json({ ok: false, message: 'Người dùng không tồn tại' });
+            return res.status(404).json({ ok: false, message: 'NgÆ°á»i dÃ¹ng khÃ´ng tá»“n táº¡i' });
         }
 
         if (!amount || amount <= 0) {
-            return res.status(400).json({ ok: false, message: 'Số tiền không hợp lệ' });
+            return res.status(400).json({ ok: false, message: 'Sá»‘ tiá»n khÃ´ng há»£p lá»‡' });
         }
 
         // In real implementation, integrate with VNPAY or Stripe
@@ -570,12 +944,12 @@ router.post('/user/wallet/deposit', authMiddleware, async (req, res) => {
 
         res.json({
             ok: true,
-            message: 'Nạp tiền thành công',
+            message: 'Náº¡p tiá»n thÃ nh cÃ´ng',
             newBalance: user.walletBalance
         });
     } catch (error) {
         console.error('Error depositing wallet:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -600,13 +974,23 @@ router.get('/user/passes/monthly', authMiddleware, async (req, res) => {
 
         const user = await User.findById(userId).lean();
         if (!user) {
-            return res.status(404).json({ ok: false, message: 'Người dùng không tồn tại' });
+            return res.status(404).json({ ok: false, message: 'NgÆ°á»i dÃ¹ng khÃ´ng tá»“n táº¡i' });
         }
 
         const routes = await Route.find({ status: "ACTIVE" })
             .select('_id routeNumber name monthlyPassPrice description operationTime')
             .sort({ routeNumber: 1, name: 1 })
             .lean();
+        const { matrix: fareMatrix } = await getFareMatrix();
+        const priorityDiscount = await getPriorityDiscountInfo(userId, fareMatrix);
+        const uiRoutes = routes.map((route) => ({
+            ...route,
+            effectiveMonthlyPassPrice: resolveMonthlyPassBasePrice(
+                FARE_PASS_TYPE.SINGLE_ROUTE,
+                Number(route.monthlyPassPrice || 0),
+                fareMatrix
+            )
+        }));
 
         let myPasses = await MonthlyPass.find({ userId: user._id })
             .populate("routeId")
@@ -617,19 +1001,344 @@ router.get('/user/passes/monthly', authMiddleware, async (req, res) => {
         myPasses = myPasses.map((pass) => ({
             ...pass,
             displayRouteNumber: pass.routeId?.routeNumber || pass.routeSnapshot?.routeNumber || "",
-            displayRouteName: pass.routeId?.name || pass.routeSnapshot?.name || "Tuyến không xác định"
+            displayRouteName: pass.routeId?.name || pass.routeSnapshot?.name || "Tuyáº¿n khÃ´ng xÃ¡c Ä‘á»‹nh"
         }));
 
         res.json({
             ok: true,
             walletBalance: user.walletBalance || 0,
             isPriorityGroup: user.isPriorityGroup,
-            routes,
-            myPasses
+            routes: uiRoutes,
+            myPasses,
+            interRouteMonthlyPrice: resolveMonthlyPassBasePrice(FARE_PASS_TYPE.INTER_ROUTE, 0, fareMatrix),
+            priorityDiscountPercent: Number(priorityDiscount.discountPercent || 0),
+            priorityDiscountEligible: !!priorityDiscount.eligible,
+            freeRideRules: fareMatrix?.freeRideRules || null
         });
     } catch (error) {
         console.error('Error fetching monthly passes:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
+    }
+});
+
+/**
+ * GET /api/schedules/:scheduleId/seats
+ * Danh sách ghế khả dụng cho một chuyến
+ * Auth: Required
+ */
+router.get('/schedules/:scheduleId/seats', authMiddleware, async (req, res) => {
+    try {
+        const schedule = await Schedule.findById(req.params.scheduleId)
+            .populate('busId', 'capacity licensePlate')
+            .populate('routeId', 'routeNumber name')
+            .lean();
+
+        if (!schedule) {
+            return res.status(404).json({ ok: false, message: 'Không tìm thấy chuyến xe.' });
+        }
+
+        if (['COMPLETED', 'CANCELLED'].includes(schedule.status)) {
+            return res.status(400).json({ ok: false, message: 'Chuyến xe không còn mở bán vé.' });
+        }
+
+        const capacity = Math.max(1, Number(schedule.busId?.capacity || 45));
+        const bookedTickets = await TripTicket.find({
+            scheduleId: schedule._id,
+            status: { $in: ['BOOKED', 'USED'] }
+        }).select('seatLabel').lean();
+
+        const bookedSet = new Set(bookedTickets.map((ticket) => String(ticket.seatLabel || '').trim().toUpperCase()));
+        const seats = Array.from({ length: capacity }, (_, index) => {
+            const seatLabel = String(index + 1).padStart(2, '0');
+            return {
+                seatLabel,
+                status: bookedSet.has(seatLabel) ? 'BOOKED' : 'AVAILABLE'
+            };
+        });
+
+        return res.json({
+            ok: true,
+            schedule: {
+                _id: schedule._id,
+                status: schedule.status,
+                busId: schedule.busId,
+                routeId: schedule.routeId
+            },
+            seats
+        });
+    } catch (error) {
+        console.error('Error listing seats for schedule:', error);
+        return res.status(500).json({ ok: false, message: 'Lỗi server' });
+    }
+});
+
+router.get('/user/passes/monthly/promo-preview', authMiddleware, async (req, res) => {
+    try {
+        const userId = req.user.userId;
+        const passType = String(req.query.passType || PASS_TYPE.SINGLE_ROUTE).trim() === PASS_TYPE.INTER_ROUTE ? PASS_TYPE.INTER_ROUTE : PASS_TYPE.SINGLE_ROUTE;
+        const routeId = String(req.query.routeId || '').trim();
+        const promoCode = normalizePromoCode(req.query.promoCode);
+
+        let route = null;
+        if (passType === PASS_TYPE.SINGLE_ROUTE) {
+            if (!routeId) {
+                return res.status(400).json({ ok: false, message: 'Vui lòng chọn tuyến trước khi áp mã.' });
+            }
+
+            route = await Route.findById(routeId).lean();
+            if (!route || route.status !== 'ACTIVE') {
+                return res.status(400).json({ ok: false, message: 'Tuyến không hợp lệ hoặc đã ngừng hoạt động.' });
+            }
+        }
+
+        const { matrix: fareMatrix } = await getFareMatrix();
+        const basePrice = resolveMonthlyPassBasePrice(
+            passType,
+            Number(route?.monthlyPassPrice || 0),
+            fareMatrix
+        );
+
+        if (!Number.isFinite(basePrice) || basePrice <= 0) {
+            return res.status(400).json({ ok: false, message: 'GiÃ¡ vÃ© thÃ¡ng chÆ°a Ä‘Æ°á»£c cáº¥u hÃ¬nh.' });
+        }
+
+        const priorityDiscount = await getPriorityDiscountInfo(userId, fareMatrix);
+        const priorityDiscountAmount = Math.round((basePrice * Number(priorityDiscount.discountPercent || 0)) / 100);
+        const priceAfterPriority = Math.max(0, basePrice - priorityDiscountAmount);
+
+        if (!promoCode) {
+            return res.json({
+                ok: true,
+                applied: false,
+                message: 'ChÆ°a nháº­p mÃ£ giáº£m giÃ¡.',
+                basePrice,
+                discountPercent: Number(priorityDiscount.discountPercent || 0),
+                priceAfterPriority,
+                promoDiscountAmount: 0,
+                finalPrice: priceAfterPriority
+            });
+        }
+
+        const { promotion, discountAmount } = await validatePromotionForMonthlyPass({
+            promoCode,
+            userId,
+            passType,
+            routeId,
+            baseForPromo: priceAfterPriority,
+            now: new Date()
+        });
+
+        return res.json({
+            ok: true,
+            applied: true,
+            message: `Ãp mÃ£ ${promotion.code} thÃ nh cÃ´ng, giáº£m ${discountAmount.toLocaleString('vi-VN')} Ä‘.`,
+            promoCode: promotion.code,
+            basePrice,
+            discountPercent: Number(priorityDiscount.discountPercent || 0),
+            priceAfterPriority,
+            promoDiscountAmount: discountAmount,
+            finalPrice: Math.max(0, priceAfterPriority - discountAmount)
+        });
+    } catch (error) {
+        return res.status(400).json({
+            ok: false,
+            message: error?.message || 'KhÃ´ng thá»ƒ kiá»ƒm tra mÃ£ giáº£m giÃ¡.'
+        });
+    }
+});
+
+/**
+ * POST /api/user/passes/monthly/checkout
+ * JWT checkout, trả về paymentUrl để frontend tự redirect
+ */
+router.post('/user/passes/monthly/checkout', authMiddleware, async (req, res) => {
+    try {
+        const userId = req.user.userId;
+        const passType = req.body?.passType === PASS_TYPE.INTER_ROUTE ? PASS_TYPE.INTER_ROUTE : PASS_TYPE.SINGLE_ROUTE;
+        const paymentMethod = parsePaymentMethod(req.body?.paymentMethod);
+        const routeId = cleanText(req.body?.routeId);
+        const month = Number(req.body?.month);
+        const year = Number(req.body?.year);
+        const promoCode = normalizePromoCode(req.body?.promoCode);
+
+        if (passType === PASS_TYPE.SINGLE_ROUTE && !routeId) {
+            return res.status(400).json({ ok: false, message: 'Vui lòng chọn tuyến.' });
+        }
+        if (!Number.isInteger(month) || month < 1 || month > 12) {
+            return res.status(400).json({ ok: false, message: 'Tháng không hợp lệ.' });
+        }
+        if (!Number.isInteger(year) || year < 2000) {
+            return res.status(400).json({ ok: false, message: 'Năm không hợp lệ.' });
+        }
+
+        await applyPriorityExpiryForUser(userId);
+        const now = new Date();
+        const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const targetMonth = new Date(year, month - 1, 1);
+        if (targetMonth < currentMonth) {
+            return res.status(400).json({ ok: false, message: 'Không thể mua vé tháng đã qua.' });
+        }
+
+        let route = null;
+        if (passType === PASS_TYPE.SINGLE_ROUTE) {
+            route = await Route.findById(routeId).lean();
+            if (!route || route.status !== 'ACTIVE') {
+                return res.status(400).json({ ok: false, message: 'Tuyến không hợp lệ.' });
+            }
+        }
+
+        const duplicate = await MonthlyPass.findOne({
+            userId,
+            month,
+            year,
+            passType,
+            routeId: passType === PASS_TYPE.SINGLE_ROUTE ? routeId : undefined,
+            status: { $ne: 'CANCELLED' }
+        }).lean();
+
+        if (duplicate) {
+            return res.status(400).json({ ok: false, message: 'Bạn đã mua vé rồi.' });
+        }
+
+        const { matrix: fareMatrix } = await getFareMatrix();
+        const basePrice = resolveMonthlyPassBasePrice(
+            passType,
+            Number(route?.monthlyPassPrice || 0),
+            fareMatrix
+        );
+        if (!basePrice || basePrice <= 0) {
+            return res.status(400).json({ ok: false, message: 'Giá vé chưa cấu hình.' });
+        }
+
+        const priority = await getPriorityDiscountInfo(userId, fareMatrix);
+        const priceAfterPriority = Math.max(0, basePrice - Math.round((basePrice * Number(priority.discountPercent || 0)) / 100));
+
+        let promotion = null;
+        let promoDiscount = 0;
+        if (promoCode) {
+            const promoResult = await validatePromotionForMonthlyPass({
+                promoCode,
+                userId,
+                passType,
+                routeId,
+                baseForPromo: priceAfterPriority,
+                now
+            });
+            promotion = promoResult.promotion;
+            promoDiscount = promoResult.discountAmount;
+        }
+
+        const finalPrice = Math.max(1, priceAfterPriority - promoDiscount);
+        const orderCode = toOrderCode();
+        const txnRef = `${paymentMethod}-MP-${orderCode}`;
+
+        await WalletTransaction.create({
+            userId,
+            amount: finalPrice,
+            originalAmount: basePrice,
+            discountAmount: basePrice - finalPrice,
+            direction: 'OUT',
+            txnType: 'MONTHLY_PASS',
+            method: paymentMethod,
+            status: 'PENDING',
+            txnRef,
+            rawReturn: {
+                orderCode,
+                passType,
+                routeId,
+                month,
+                year,
+                promoCode: promotion?.code || '',
+                promotionId: promotion?._id || '',
+                promoDiscount,
+                promoReleased: false
+            }
+        });
+
+        if (paymentMethod === PAYMENT_METHOD.VNPAY) {
+            const { tmnCode, hashSecret, vnpUrl, returnUrl } = getVnpayBaseConfig(req);
+            const vnpParams = {
+                vnp_Version: '2.1.0',
+                vnp_Command: 'pay',
+                vnp_TmnCode: tmnCode,
+                vnp_Locale: 'vn',
+                vnp_CurrCode: 'VND',
+                vnp_TxnRef: txnRef,
+                vnp_OrderInfo: [
+                    'Thanh toan ve thang',
+                    passType === PASS_TYPE.INTER_ROUTE ? 'lien tuyen' : 'don tuyen',
+                    `ky ${String(month).padStart(2, '0')}/${year}`,
+                    txnRef
+                ].join(' - '),
+                vnp_OrderType: 'other',
+                vnp_Amount: Math.round(finalPrice * 100),
+                vnp_ReturnUrl: returnUrl,
+                vnp_IpAddr: getClientIp(req),
+                vnp_CreateDate: formatDateVnp(new Date()),
+                vnp_ExpireDate: addMinutesVnp(new Date(), 15)
+            };
+
+            return res.json({
+                ok: true,
+                paymentMethod,
+                paymentUrl: buildVnpUrl(vnpUrl, vnpParams, hashSecret)
+            });
+        }
+
+        if (paymentMethod === PAYMENT_METHOD.MOMO) {
+            const partnerCode = process.env.MOMO_PARTNER_CODE || '';
+            const accessKey = process.env.MOMO_ACCESS_KEY || '';
+            const secretKey = process.env.MOMO_SECRET_KEY || '';
+            const redirectUrl = process.env.MOMO_MONTHLY_RETURN_URL || `${buildBaseUrl(req)}/passenger/passes/monthly/momo-return`;
+            const ipnUrl = process.env.MOMO_MONTHLY_RETURN_URL || redirectUrl;
+            const orderInfo = `Thanh toán vé tháng ${txnRef}`;
+            const requestId = txnRef;
+            const requestType = 'payWithMethod';
+            const extraData = '';
+            const autoCapture = true;
+            const lang = 'vi';
+
+            const rawSignature = [
+                `accessKey=${accessKey}`,
+                `amount=${finalPrice}`,
+                `extraData=${extraData}`,
+                `ipnUrl=${ipnUrl}`,
+                `orderId=${txnRef}`,
+                `orderInfo=${orderInfo}`,
+                `partnerCode=${partnerCode}`,
+                `redirectUrl=${redirectUrl}`,
+                `requestId=${requestId}`,
+                `requestType=${requestType}`
+            ].join('&');
+
+            const momo = await createMomoPayment({
+                partnerCode,
+                partnerName: process.env.MOMO_PARTNER_NAME || 'BusDN',
+                storeId: process.env.MOMO_STORE_ID || 'BusDNStore',
+                requestId,
+                amount: String(finalPrice),
+                orderId: txnRef,
+                orderInfo,
+                redirectUrl,
+                ipnUrl,
+                lang,
+                requestType,
+                autoCapture,
+                extraData,
+                signature: signMomoRaw(rawSignature, accessKey, secretKey)
+            });
+
+            return res.json({
+                ok: true,
+                paymentMethod,
+                paymentUrl: momo.payUrl
+            });
+        }
+
+        return res.status(400).json({ ok: false, message: 'Phương thức thanh toán không hợp lệ.' });
+    } catch (error) {
+        console.error('Error creating monthly pass checkout:', error);
+        return res.status(500).json({ ok: false, message: error?.message || 'Không thể khởi tạo thanh toán.' });
     }
 });
 
@@ -643,16 +1352,17 @@ router.post('/user/passes/monthly/purchase', authMiddleware, async (req, res) =>
     try {
         const userId = req.user.userId;
         const { routeId, month, year } = req.body;
+        const promoCode = normalizePromoCode(req.body.promoCode);
 
         if (!routeId || !month || !year) {
-            return res.status(400).json({ ok: false, message: 'Thiếu thông tin tuyến hoặc kỳ vé' });
+            return res.status(400).json({ ok: false, message: 'Thiáº¿u thÃ´ng tin tuyáº¿n hoáº·c ká»³ vÃ©' });
         }
 
         await applyPriorityExpiryForUser(userId);
-        const currentUser = await User.findById(userId).select("walletBalance isPriorityGroup");
+        const currentUser = await User.findById(userId).select("walletBalance isPriorityGroup priorityProfile");
 
         if (!currentUser) {
-            return res.status(404).json({ ok: false, message: 'Người dùng không tồn tại' });
+            return res.status(404).json({ ok: false, message: 'NgÆ°á»i dÃ¹ng khÃ´ng tá»“n táº¡i' });
         }
 
         const now = new Date();
@@ -660,12 +1370,12 @@ router.post('/user/passes/monthly/purchase', authMiddleware, async (req, res) =>
         const targetMonthStart = new Date(year, month - 1, 1);
 
         if (targetMonthStart < currentMonthStart) {
-            return res.status(400).json({ ok: false, message: 'Không thể mua vé cho tháng đã qua' });
+            return res.status(400).json({ ok: false, message: 'KhÃ´ng thá»ƒ mua vÃ© cho thÃ¡ng Ä‘Ã£ qua' });
         }
 
         const route = await Route.findById(routeId).lean();
         if (!route || route.status !== "ACTIVE") {
-            return res.status(400).json({ ok: false, message: 'Tuyến không hợp lệ hoặc đã ngưng hoạt động' });
+            return res.status(400).json({ ok: false, message: 'Tuyáº¿n khÃ´ng há»£p lá»‡ hoáº·c Ä‘Ã£ ngÆ°ng hoáº¡t Ä‘á»™ng' });
         }
 
         const existingPass = await MonthlyPass.findOne({
@@ -673,21 +1383,43 @@ router.post('/user/passes/monthly/purchase', authMiddleware, async (req, res) =>
         }).lean();
 
         if (existingPass) {
-            return res.status(400).json({ ok: false, message: `Bạn đã mua vé tháng cho tuyến này trong tháng ${month}/${year}` });
+            return res.status(400).json({ ok: false, message: `Báº¡n Ä‘Ã£ mua vÃ© thÃ¡ng cho tuyáº¿n nÃ y trong thÃ¡ng ${month}/${year}` });
         }
 
-        const originalPrice = Number(route.monthlyPassPrice || 0);
+        const { matrix: fareMatrix } = await getFareMatrix();
+        const originalPrice = resolveMonthlyPassBasePrice(
+            PASS_TYPE.SINGLE_ROUTE,
+            Number(route.monthlyPassPrice || 0),
+            fareMatrix
+        );
         if (!Number.isFinite(originalPrice) || originalPrice <= 0) {
-            return res.status(400).json({ ok: false, message: 'Giá vé tháng tuyến này chưa được cấu hình' });
+            return res.status(400).json({ ok: false, message: 'GiÃ¡ vÃ© thÃ¡ng tuyáº¿n nÃ y chÆ°a Ä‘Æ°á»£c cáº¥u hÃ¬nh' });
         }
 
-        const isPriorityGroup = !!currentUser?.isPriorityGroup;
-        const discountedPrice = applyPriorityDiscount(originalPrice, { isPriorityGroup });
-        const price = Math.round(Math.max(0, discountedPrice));
+        const priorityDiscount = await getPriorityDiscountInfo(userId, fareMatrix);
+        const priorityDiscountAmount = Math.round((originalPrice * Number(priorityDiscount.discountPercent || 0)) / 100);
+        const priceAfterPriority = Math.max(0, originalPrice - priorityDiscountAmount);
+
+        let promoDiscountAmount = 0;
+        let promotion = null;
+        if (promoCode) {
+            const promoResult = await validatePromotionForMonthlyPass({
+                promoCode,
+                userId,
+                passType: PASS_TYPE.SINGLE_ROUTE,
+                routeId,
+                baseForPromo: priceAfterPriority,
+                now: new Date()
+            });
+            promoDiscountAmount = promoResult.discountAmount;
+            promotion = promoResult.promotion;
+        }
+
+        const price = Math.max(0, priceAfterPriority - promoDiscountAmount);
         const discountAmount = Math.max(0, originalPrice - price);
 
         if (currentUser.walletBalance < price) {
-            return res.status(400).json({ ok: false, message: 'Số dư ví không đủ để mua vé tháng' });
+            return res.status(400).json({ ok: false, message: 'Sá»‘ dÆ° vÃ­ khÃ´ng Ä‘á»§ Ä‘á»ƒ mua vÃ© thÃ¡ng' });
         }
 
         const userAfterDeduct = await User.findOneAndUpdate(
@@ -697,13 +1429,17 @@ router.post('/user/passes/monthly/purchase', authMiddleware, async (req, res) =>
         );
 
         if (!userAfterDeduct) {
-            return res.status(400).json({ ok: false, message: 'Giao dịch thất bại, vui lòng thử lại' });
+            return res.status(400).json({ ok: false, message: 'Giao dá»‹ch tháº¥t báº¡i, vui lÃ²ng thá»­ láº¡i' });
         }
 
         const { validFrom, validTo } = getMonthDateRange(year, month);
         let createdPass;
 
         try {
+            if (promotion?._id) {
+                await consumePromotionUsage(promotion._id);
+            }
+
             createdPass = await MonthlyPass.create({
                 userId,
                 routeId,
@@ -725,7 +1461,7 @@ router.post('/user/passes/monthly/purchase', authMiddleware, async (req, res) =>
         } catch (createErr) {
             await User.findByIdAndUpdate(userId, { $inc: { walletBalance: price } });
             if (createErr?.code === 11000) {
-                return res.status(400).json({ ok: false, message: 'Bạn đã mua vé tháng cho tuyến này rồi' });
+                return res.status(400).json({ ok: false, message: 'Báº¡n Ä‘Ã£ mua vÃ© thÃ¡ng cho tuyáº¿n nÃ y rá»“i' });
             }
             throw createErr;
         }
@@ -737,22 +1473,27 @@ router.post('/user/passes/monthly/purchase', authMiddleware, async (req, res) =>
             discountAmount,
             direction: "OUT",
             txnType: "MONTHLY_PASS",
-            note: `Mua vé tháng tuyến ${route.routeNumber || ""} - ${route.name || ""} (${month}/${year})${isPriorityGroup ? " - Ưu đãi 20%" : ""}`,
+            note: `Mua vÃ© thÃ¡ng tuyáº¿n ${route.routeNumber || ""} - ${route.name || ""} (${month}/${year})`,
             method: "WALLET",
             status: "SUCCESS",
             relatedMonthlyPassId: createdPass._id,
-            paidAt: new Date()
+            paidAt: new Date(),
+            rawReturn: {
+                promoCode: promotion?.code || '',
+                promotionId: promotion?._id || '',
+                promoDiscount: promoDiscountAmount
+            }
         });
 
         res.json({
             ok: true,
-            message: `Mua vé tháng thành công cho tuyến ${route.routeNumber} (${month}/${year})`,
+            message: `Mua vÃ© thÃ¡ng thÃ nh cÃ´ng cho tuyáº¿n ${route.routeNumber} (${month}/${year})`,
             pass: createdPass,
             newBalance: userAfterDeduct.walletBalance
         });
     } catch (error) {
         console.error('Error purchasing monthly pass:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -774,7 +1515,7 @@ const mapAudienceToRoles = (audience) => {
 router.get('/notifications', authMiddleware, async (req, res) => {
     try {
         const user = await User.findById(req.user.userId).select('role');
-        if (!user) return res.status(404).json({ ok: false, message: 'Người dùng không tồn tại' });
+        if (!user) return res.status(404).json({ ok: false, message: 'NgÆ°á»i dÃ¹ng khÃ´ng tá»“n táº¡i' });
 
         const notifications = await Notification.find({ targetRoles: user.role })
             .sort({ sentAt: -1, createdAt: -1 })
@@ -784,13 +1525,13 @@ router.get('/notifications', authMiddleware, async (req, res) => {
         res.json({ ok: true, notifications });
     } catch (error) {
         console.error('Error fetching notifications:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
 /**
  * POST /api/admin/notifications/broadcast
- * Gửi thông báo hàng loạt + lưu DB + đẩy realtime Socket.IO
+ * Gá»­i thÃ´ng bÃ¡o hÃ ng loáº¡t + lÆ°u DB + Ä‘áº©y realtime Socket.IO
  */
 router.post('/admin/notifications/broadcast', authMiddleware, async (req, res) => {
     try {
@@ -801,7 +1542,7 @@ router.post('/admin/notifications/broadcast', authMiddleware, async (req, res) =
 
         const { audience = 'ALL', title, message } = req.body;
         if (!title || !message) {
-            return res.status(400).json({ ok: false, message: 'Tiêu đề và nội dung là bắt buộc' });
+            return res.status(400).json({ ok: false, message: 'TiÃªu Ä‘á» vÃ  ná»™i dung lÃ  báº¯t buá»™c' });
         }
 
         const targetRoles = mapAudienceToRoles(audience);
@@ -831,13 +1572,234 @@ router.post('/admin/notifications/broadcast', authMiddleware, async (req, res) =
 
         res.json({
             ok: true,
-            message: `Đã gửi thông báo "${created.title}" đến ${audience === 'DRIVERS' ? 'tài xế' : audience === 'CONDUCTORS' ? 'phụ xe' : 'tất cả người dùng'} thành công.`,
+            message: `ÄÃ£ gá»­i thÃ´ng bÃ¡o "${created.title}" Ä‘áº¿n ${audience === 'DRIVERS' ? 'tÃ i xáº¿' : audience === 'CONDUCTORS' ? 'phá»¥ xe' : 'táº¥t cáº£ ngÆ°á»i dÃ¹ng'} thÃ nh cÃ´ng.`,
             sentAt: created.sentAt,
             notification: created
         });
     } catch (err) {
         console.error('Error broadcasting notification:', err);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
+    }
+});
+
+/**
+ * GET /api/admin/fare-matrix
+ * Auth: Required (ADMIN)
+ */
+router.get('/admin/fare-matrix', authMiddleware, async (req, res) => {
+    try {
+        const adminUser = await ensureAdminApi(req, res);
+        if (!adminUser) return;
+
+        const [{ matrix, source }, routes] = await Promise.all([
+            getFareMatrix(),
+            Route.find({ status: 'ACTIVE' }).sort({ routeNumber: 1 }).lean()
+        ]);
+
+        return res.json({
+            ok: true,
+            source,
+            matrix,
+            routes: routes.map((route) => ({
+                _id: route._id,
+                routeNumber: route.routeNumber,
+                name: route.name,
+                monthlyPassPrice: Number(route.monthlyPassPrice || 0),
+                effectiveMonthlyPrice: resolveMonthlyPassBasePrice(
+                    PASS_TYPE.SINGLE_ROUTE,
+                    Number(route.monthlyPassPrice || 0),
+                    matrix
+                ),
+                singleRideEstimatedFare: estimateSingleRideFare(Number(route.distance || 0), matrix)
+            }))
+        });
+    } catch (err) {
+        console.error('Error fetching fare matrix:', err);
+        return res.status(500).json({ ok: false, message: 'Lỗi server' });
+    }
+});
+
+/**
+ * PUT /api/admin/fare-matrix
+ * Auth: Required (ADMIN)
+ */
+router.put('/admin/fare-matrix', authMiddleware, async (req, res) => {
+    try {
+        const adminUser = await ensureAdminApi(req, res);
+        if (!adminUser) return;
+
+        const payload = {
+            singleRide: {
+                basePrice: Number(req.body?.singleRide?.basePrice || 0),
+                distanceTiers: Array.isArray(req.body?.singleRide?.distanceTiers) ? req.body.singleRide.distanceTiers : []
+            },
+            monthly: {
+                interRoutePrice: Number(req.body?.monthly?.interRoutePrice || 0),
+                singleRouteDefaultPrice: Number(req.body?.monthly?.singleRouteDefaultPrice || 0)
+            },
+            priorityDiscounts: req.body?.priorityDiscounts || {},
+            freeRideRules: req.body?.freeRideRules || {}
+        };
+
+        await upsertFareMatrix(payload, req.user.userId);
+        const { matrix } = await getFareMatrix();
+
+        return res.json({
+            ok: true,
+            message: 'Đã cập nhật bảng giá vé.',
+            matrix
+        });
+    } catch (err) {
+        console.error('Error updating fare matrix:', err);
+        return res.status(400).json({ ok: false, message: err?.message || 'Không thể cập nhật bảng giá vé.' });
+    }
+});
+
+/**
+ * GET /api/admin/promotions
+ * Auth: Required (ADMIN)
+ */
+router.get('/admin/promotions', authMiddleware, async (req, res) => {
+    try {
+        const adminUser = await ensureAdminApi(req, res);
+        if (!adminUser) return;
+
+        const q = cleanText(req.query.q);
+        const status = cleanText(req.query.status).toUpperCase();
+        const filter = {};
+
+        if (q) {
+            filter.$or = [
+                { code: { $regex: q, $options: 'i' } },
+                { name: { $regex: q, $options: 'i' } }
+            ];
+        }
+
+        if (ALLOWED_PROMOTION_STATUS.includes(status)) {
+            filter.status = status;
+        }
+
+        const [promotions, routes] = await Promise.all([
+            Promotion.find(filter)
+                .populate('routeId', 'routeNumber name status')
+                .sort({ createdAt: -1 })
+                .lean(),
+            Route.find({ status: 'ACTIVE' }).sort({ routeNumber: 1 }).lean()
+        ]);
+
+        return res.json({ ok: true, promotions, routes });
+    } catch (err) {
+        console.error('Error fetching promotions:', err);
+        return res.status(500).json({ ok: false, message: 'Lỗi server' });
+    }
+});
+
+/**
+ * POST /api/admin/promotions
+ * Auth: Required (ADMIN)
+ */
+router.post('/admin/promotions', authMiddleware, async (req, res) => {
+    try {
+        const adminUser = await ensureAdminApi(req, res);
+        if (!adminUser) return;
+
+        const payload = mapPromotionPayloadFromApi(req.body);
+        const errors = await validatePromotionPayloadForApi(payload, 'create');
+        if (errors.length) {
+            return res.status(400).json({ ok: false, message: errors[0] });
+        }
+
+        const existed = await Promotion.findOne({ code: payload.code }).lean();
+        if (existed) {
+            return res.status(400).json({ ok: false, message: `Mã khuyến mãi "${payload.code}" đã tồn tại.` });
+        }
+
+        const lifecycleStatus = toPromotionLifecycleStatus(payload.status, payload.startAt, payload.endAt, new Date());
+        const promotion = await Promotion.create({
+            ...payload,
+            status: lifecycleStatus,
+            createdBy: req.user.userId,
+            updatedBy: req.user.userId
+        });
+
+        return res.status(201).json({ ok: true, message: 'Đã tạo chương trình khuyến mãi.', promotion });
+    } catch (err) {
+        console.error('Error creating promotion:', err);
+        return res.status(400).json({ ok: false, message: err?.message || 'Không thể tạo chương trình khuyến mãi.' });
+    }
+});
+
+/**
+ * PUT /api/admin/promotions/:id
+ * Auth: Required (ADMIN)
+ */
+router.put('/admin/promotions/:id', authMiddleware, async (req, res) => {
+    try {
+        const adminUser = await ensureAdminApi(req, res);
+        if (!adminUser) return;
+
+        const promotion = await Promotion.findById(req.params.id);
+        if (!promotion) {
+            return res.status(404).json({ ok: false, message: 'Không tìm thấy chương trình cần cập nhật.' });
+        }
+
+        const payload = mapPromotionPayloadFromApi(req.body);
+        const errors = await validatePromotionPayloadForApi(payload, 'update');
+        if (errors.length) {
+            return res.status(400).json({ ok: false, message: errors[0] });
+        }
+
+        const duplicate = await Promotion.findOne({ code: payload.code, _id: { $ne: req.params.id } }).lean();
+        if (duplicate) {
+            return res.status(400).json({ ok: false, message: `Mã khuyến mãi "${payload.code}" đã tồn tại.` });
+        }
+
+        const lifecycleStatus = toPromotionLifecycleStatus(payload.status, payload.startAt, payload.endAt, new Date());
+        Object.assign(promotion, payload, {
+            status: lifecycleStatus,
+            updatedBy: req.user.userId
+        });
+        if (lifecycleStatus !== 'ENDED') {
+            promotion.endedEarlyAt = null;
+        }
+        await promotion.save();
+
+        return res.json({ ok: true, message: 'Đã cập nhật chương trình khuyến mãi.', promotion });
+    } catch (err) {
+        console.error('Error updating promotion:', err);
+        return res.status(400).json({ ok: false, message: err?.message || 'Không thể cập nhật chương trình khuyến mãi.' });
+    }
+});
+
+/**
+ * POST /api/admin/promotions/:id/end-early
+ * Auth: Required (ADMIN)
+ */
+router.post('/admin/promotions/:id/end-early', authMiddleware, async (req, res) => {
+    try {
+        const adminUser = await ensureAdminApi(req, res);
+        if (!adminUser) return;
+
+        const promotion = await Promotion.findById(req.params.id);
+        if (!promotion) {
+            return res.status(404).json({ ok: false, message: 'Không tìm thấy chương trình cần kết thúc sớm.' });
+        }
+
+        if (promotion.status === 'ENDED' || promotion.status === 'CANCELLED') {
+            return res.status(400).json({ ok: false, message: 'Chương trình này đã kết thúc trước đó.' });
+        }
+
+        const now = new Date();
+        promotion.status = 'ENDED';
+        promotion.endAt = now;
+        promotion.endedEarlyAt = now;
+        promotion.updatedBy = req.user.userId;
+        await promotion.save();
+
+        return res.json({ ok: true, message: 'Đã kết thúc sớm chương trình.', promotion });
+    } catch (err) {
+        console.error('Error ending promotion early:', err);
+        return res.status(400).json({ ok: false, message: err?.message || 'Không thể kết thúc chương trình.' });
     }
 });
 
@@ -893,7 +1855,7 @@ router.get('/admin/users', authMiddleware, async (req, res) => {
         });
     } catch (error) {
         console.error('Error fetching admin users:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -911,10 +1873,10 @@ router.post('/admin/users/:userId/toggle-lock', authMiddleware, async (req, res)
 
         const user = await User.findById(req.params.userId);
         if (!user) {
-            return res.status(404).json({ ok: false, message: 'Người dùng không tồn tại' });
+            return res.status(404).json({ ok: false, message: 'NgÆ°á»i dÃ¹ng khÃ´ng tá»“n táº¡i' });
         }
         if (user.role === 'ADMIN') {
-            return res.status(403).json({ ok: false, message: 'Không thể khóa Admin' });
+            return res.status(403).json({ ok: false, message: 'KhÃ´ng thá»ƒ khÃ³a Admin' });
         }
 
         user.status = user.status === 'LOCKED' || user.isLocked ? 'ACTIVE' : 'LOCKED';
@@ -923,7 +1885,7 @@ router.post('/admin/users/:userId/toggle-lock', authMiddleware, async (req, res)
 
         res.json({
             ok: true,
-            message: `Tài khoản đã được ${user.isLocked ? 'khóa' : 'mở khóa'}`,
+            message: `TÃ i khoáº£n Ä‘Ã£ Ä‘Æ°á»£c ${user.isLocked ? 'khÃ³a' : 'má»Ÿ khÃ³a'}`,
             user: {
                 id: user._id,
                 status: user.status,
@@ -932,7 +1894,7 @@ router.post('/admin/users/:userId/toggle-lock', authMiddleware, async (req, res)
         });
     } catch (error) {
         console.error('Error toggling admin lock:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -951,17 +1913,17 @@ router.post('/admin/users/create', authMiddleware, async (req, res) => {
         const { fullName, email, phone, role } = req.body;
 
         if (!fullName || !role || (!email && !phone)) {
-            return res.status(400).json({ ok: false, message: 'Vui lòng cung cấp đủ họ tên, vai trò và ít nhất SĐT hoặc Email' });
+            return res.status(400).json({ ok: false, message: 'Vui lÃ²ng cung cáº¥p Ä‘á»§ há» tÃªn, vai trÃ² vÃ  Ã­t nháº¥t SÄT hoáº·c Email' });
         }
 
         // Check if existing
         if (email) {
             const existingByEmail = await User.findOne({ email });
-            if (existingByEmail) return res.status(400).json({ ok: false, message: 'Email đã tồn tại' });
+            if (existingByEmail) return res.status(400).json({ ok: false, message: 'Email Ä‘Ã£ tá»“n táº¡i' });
         }
         if (phone) {
             const existingByPhone = await User.findOne({ phone });
-            if (existingByPhone) return res.status(400).json({ ok: false, message: 'Số điện thoại đã tồn tại' });
+            if (existingByPhone) return res.status(400).json({ ok: false, message: 'Sá»‘ Ä‘iá»‡n thoáº¡i Ä‘Ã£ tá»“n táº¡i' });
         }
 
         // Just creating a dummy pass for now, realistically this imports adminController logic
@@ -984,7 +1946,7 @@ router.post('/admin/users/create', authMiddleware, async (req, res) => {
 
         res.json({
             ok: true,
-            message: 'Tạo tài khoản thành công',
+            message: 'Táº¡o tÃ i khoáº£n thÃ nh cÃ´ng',
             account: {
                 fullName,
                 email,
@@ -997,7 +1959,7 @@ router.post('/admin/users/create', authMiddleware, async (req, res) => {
 
     } catch (error) {
         console.error('Error creating admin user:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -1029,7 +1991,7 @@ router.get('/admin/priority-profiles', authMiddleware, async (req, res) => {
         res.json({ ok: true, profiles });
     } catch (error) {
         console.error('Error fetching priority profiles:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -1062,10 +2024,10 @@ router.post('/admin/priority-profiles/:profileId/approve', authMiddleware, async
 
         await emitPendingPriorityCount();
 
-        res.json({ ok: true, message: 'Đã duyệt hồ sơ' });
+        res.json({ ok: true, message: 'ÄÃ£ duyá»‡t há»“ sÆ¡' });
     } catch (error) {
         console.error('Error approving profile:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -1097,10 +2059,10 @@ router.post('/admin/priority-profiles/:profileId/reject', authMiddleware, async 
 
         await emitPendingPriorityCount();
 
-        res.json({ ok: true, message: 'Đã từ chối hồ sơ' });
+        res.json({ ok: true, message: 'ÄÃ£ tá»« chá»‘i há»“ sÆ¡' });
     } catch (error) {
         console.error('Error rejecting profile:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -1141,7 +2103,7 @@ router.get('/admin/routes', authMiddleware, async (req, res) => {
         res.json({ ok: true, routes });
     } catch (error) {
         console.error('Error fetching admin routes:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -1156,11 +2118,11 @@ router.post('/admin/routes/create', authMiddleware, async (req, res) => {
         const { routeNumber, name, distance, startTime, endTime, status, description, monthlyPassPrice, frequencyMinutes, roundTripMinutes, bufferMinutes } = req.body;
 
         if (!routeNumber || !name || distance == null) {
-            return res.status(400).json({ ok: false, message: 'Vui lòng nhập đầy đủ Mã tuyến, Tên tuyến, Cự ly.' });
+            return res.status(400).json({ ok: false, message: 'Vui lÃ²ng nháº­p Ä‘áº§y Ä‘á»§ MÃ£ tuyáº¿n, TÃªn tuyáº¿n, Cá»± ly.' });
         }
 
         const existed = await Route.findOne({ routeNumber: routeNumber.trim().toUpperCase() }).lean();
-        if (existed) return res.status(400).json({ ok: false, message: `Mã tuyến "${routeNumber}" đã tồn tại.` });
+        if (existed) return res.status(400).json({ ok: false, message: `MÃ£ tuyáº¿n "${routeNumber}" Ä‘Ã£ tá»“n táº¡i.` });
 
         const payload = {
             routeNumber: routeNumber.trim().toUpperCase(),
@@ -1180,11 +2142,11 @@ router.post('/admin/routes/create', authMiddleware, async (req, res) => {
         }
 
         const newRoute = await Route.create(payload);
-        res.json({ ok: true, message: 'Tạo tuyến thành công', route: newRoute });
+        res.json({ ok: true, message: 'Táº¡o tuyáº¿n thÃ nh cÃ´ng', route: newRoute });
     } catch (err) {
         console.error('Error creating route:', err);
-        if (err.code === 11000) return res.status(400).json({ ok: false, message: 'Mã tuyến đã tồn tại.' });
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        if (err.code === 11000) return res.status(400).json({ ok: false, message: 'MÃ£ tuyáº¿n Ä‘Ã£ tá»“n táº¡i.' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -1200,11 +2162,11 @@ router.put('/admin/routes/:id', authMiddleware, async (req, res) => {
         const { routeNumber, name, distance, startTime, endTime, status, description, monthlyPassPrice, frequencyMinutes, roundTripMinutes, bufferMinutes } = req.body;
 
         const route = await Route.findById(id);
-        if (!route) return res.status(404).json({ ok: false, message: 'Không tìm thấy tuyến' });
+        if (!route) return res.status(404).json({ ok: false, message: 'KhÃ´ng tÃ¬m tháº¥y tuyáº¿n' });
 
         const checkRouteNum = routeNumber.trim().toUpperCase();
         const existed = await Route.findOne({ routeNumber: checkRouteNum, _id: { $ne: id } }).lean();
-        if (existed) return res.status(400).json({ ok: false, message: `Mã tuyến "${checkRouteNum}" đã tồn tại.` });
+        if (existed) return res.status(400).json({ ok: false, message: `MÃ£ tuyáº¿n "${checkRouteNum}" Ä‘Ã£ tá»“n táº¡i.` });
 
         route.routeNumber = checkRouteNum;
         route.name = name.trim();
@@ -1224,11 +2186,11 @@ router.put('/admin/routes/:id', authMiddleware, async (req, res) => {
         }
 
         await route.save();
-        res.json({ ok: true, message: 'Cập nhật tuyến thành công', route });
+        res.json({ ok: true, message: 'Cáº­p nháº­t tuyáº¿n thÃ nh cÃ´ng', route });
     } catch (err) {
         console.error('Error updating route:', err);
-        if (err.code === 11000) return res.status(400).json({ ok: false, message: 'Mã tuyến đã tồn tại.' });
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        if (err.code === 11000) return res.status(400).json({ ok: false, message: 'MÃ£ tuyáº¿n Ä‘Ã£ tá»“n táº¡i.' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -1242,15 +2204,15 @@ router.post('/admin/routes/:id/toggle-status', authMiddleware, async (req, res) 
         if (!adminUser || adminUser.role !== 'ADMIN') return res.status(403).json({ ok: false, message: 'Forbidden' });
 
         const route = await Route.findById(req.params.id);
-        if (!route) return res.status(404).json({ ok: false, message: 'Không tìm thấy tuyến' });
+        if (!route) return res.status(404).json({ ok: false, message: 'KhÃ´ng tÃ¬m tháº¥y tuyáº¿n' });
 
         route.status = route.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
         await route.save();
 
-        res.json({ ok: true, message: `Đã ${route.status === 'ACTIVE' ? 'kích hoạt' : 'tạm ngưng'} tuyến`, status: route.status });
+        res.json({ ok: true, message: `ÄÃ£ ${route.status === 'ACTIVE' ? 'kÃ­ch hoáº¡t' : 'táº¡m ngÆ°ng'} tuyáº¿n`, status: route.status });
     } catch (err) {
         console.error('Error toggling route status:', err);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -1290,7 +2252,7 @@ router.get('/admin/stops', authMiddleware, async (req, res) => {
         res.json({ ok: true, stops });
     } catch (error) {
         console.error('Error fetching admin stops:', error);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -1308,11 +2270,11 @@ router.post('/admin/stops/create', authMiddleware, async (req, res) => {
         address = typeof address === 'string' ? address.trim() : '';
 
         if (!name || lat == null || lng == null) {
-            return res.status(400).json({ ok: false, message: 'Vui lòng nhập đầy đủ Tên trạm, Vĩ độ và Kinh độ.' });
+            return res.status(400).json({ ok: false, message: 'Vui lÃ²ng nháº­p Ä‘áº§y Ä‘á»§ TÃªn tráº¡m, VÄ© Ä‘á»™ vÃ  Kinh Ä‘á»™.' });
         }
 
         const existed = await Stop.findOne({ name }).lean();
-        if (existed) return res.status(400).json({ ok: false, message: `Trạm "${name}" đã tồn tại.` });
+        if (existed) return res.status(400).json({ ok: false, message: `Tráº¡m "${name}" Ä‘Ã£ tá»“n táº¡i.` });
 
         const newStop = await Stop.create({
             name,
@@ -1323,10 +2285,10 @@ router.post('/admin/stops/create', authMiddleware, async (req, res) => {
             status: ['ACTIVE', 'INACTIVE'].includes(status) ? status : 'ACTIVE'
         });
 
-        res.json({ ok: true, message: 'Tạo trạm thành công', stop: newStop });
+        res.json({ ok: true, message: 'Táº¡o tráº¡m thÃ nh cÃ´ng', stop: newStop });
     } catch (err) {
         console.error('Error creating stop:', err);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -1345,11 +2307,11 @@ router.put('/admin/stops/:id', authMiddleware, async (req, res) => {
         address = typeof address === 'string' ? address.trim() : '';
 
         const stop = await Stop.findById(id);
-        if (!stop) return res.status(404).json({ ok: false, message: 'Không tìm thấy trạm' });
+        if (!stop) return res.status(404).json({ ok: false, message: 'KhÃ´ng tÃ¬m tháº¥y tráº¡m' });
 
         if (name && name !== stop.name) {
             const existed = await Stop.findOne({ name }).lean();
-            if (existed) return res.status(400).json({ ok: false, message: `Trạm "${name}" đã tồn tại.` });
+            if (existed) return res.status(400).json({ ok: false, message: `Tráº¡m "${name}" Ä‘Ã£ tá»“n táº¡i.` });
         }
 
         stop.name = name || stop.name;
@@ -1361,15 +2323,15 @@ router.put('/admin/stops/:id', authMiddleware, async (req, res) => {
 
         await stop.save();
 
-        res.json({ ok: true, message: 'Cập nhật trạm thành công', stop });
+        res.json({ ok: true, message: 'Cáº­p nháº­t tráº¡m thÃ nh cÃ´ng', stop });
     } catch (err) {
         console.error('Error updating stop:', err);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
 /**
- * Lịch Chạy / Xe Buýt (Schedule & Buses)
+ * Lá»‹ch Cháº¡y / Xe BuÃ½t (Schedule & Buses)
  */
 router.get('/admin/buses', authMiddleware, scheduleController.getBuses);
 router.post('/admin/buses/create', authMiddleware, scheduleController.createBus);
@@ -1384,13 +2346,16 @@ router.put('/admin/schedules/:id', authMiddleware, scheduleController.updateSche
 router.delete('/admin/schedules/:id', authMiddleware, scheduleController.deleteSchedule);
 router.patch('/admin/schedules/:id/log', authMiddleware, scheduleController.updateTripLog);
 router.post('/driver/start-trip', authMiddleware, scheduleController.startTrip);
+router.post('/driver/finish-trip', authMiddleware, scheduleController.finishTrip);
+router.post('/driver/tracking/location', authMiddleware, scheduleController.updateTrackingLocation);
+router.post('/driver/load-status', authMiddleware, scheduleController.updateLoadStatus);
 router.post('/conductor/start-trip', authMiddleware, scheduleController.startTrip);
 
 // PUT /api/admin/buses/:id
 router.put('/admin/buses/:id', authMiddleware, scheduleController.updateBus);
 
 /**
- * Báo cáo doanh thu (Revenue Reports)
+ * BÃ¡o cÃ¡o doanh thu (Revenue Reports)
  * GET /api/admin/reports/revenue?from=YYYY-MM-DD&to=YYYY-MM-DD&group=day|route
  */
 router.get('/admin/reports/revenue', authMiddleware, async (req, res) => {
@@ -1445,8 +2410,8 @@ router.get('/admin/reports/revenue', authMiddleware, async (req, res) => {
             if (group === 'route') {
                 key = String(s.routeId?._id || 'unknown');
                 const routeNumber = s.routeId?.routeNumber || '?';
-                const routeName = s.routeId?.name || 'Tuyến không xác định';
-                label = `Tuyến ${routeNumber} - ${routeName}`;
+                const routeName = s.routeId?.name || 'Tuyáº¿n khÃ´ng xÃ¡c Ä‘á»‹nh';
+                label = `Tuyáº¿n ${routeNumber} - ${routeName}`;
             } else {
                 // group by day
                 const d = s.date ? new Date(s.date) : null;
@@ -1459,7 +2424,7 @@ router.get('/admin/reports/revenue', authMiddleware, async (req, res) => {
                         month: '2-digit',
                         year: 'numeric',
                     })
-                    : 'Không rõ ngày';
+                    : 'KhÃ´ng rÃµ ngÃ y';
             }
 
             if (!map.has(key)) {
@@ -1487,7 +2452,7 @@ router.get('/admin/reports/revenue', authMiddleware, async (req, res) => {
         res.json({ ok: true, summary, rows, groupBy: group });
     } catch (err) {
         console.error('Error building revenue report:', err);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -1500,15 +2465,15 @@ router.post('/admin/stops/:id/toggle-status', authMiddleware, async (req, res) =
         if (!adminUser || adminUser.role !== 'ADMIN') return res.status(403).json({ ok: false, message: 'Forbidden' });
 
         const stop = await Stop.findById(req.params.id);
-        if (!stop) return res.status(404).json({ ok: false, message: 'Không tìm thấy trạm' });
+        if (!stop) return res.status(404).json({ ok: false, message: 'KhÃ´ng tÃ¬m tháº¥y tráº¡m' });
 
         stop.status = stop.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
         await stop.save();
 
-        res.json({ ok: true, message: `Đã ${stop.status === 'ACTIVE' ? 'kích hoạt' : 'tạm ngưng'} trạm`, status: stop.status });
+        res.json({ ok: true, message: `ÄÃ£ ${stop.status === 'ACTIVE' ? 'kÃ­ch hoáº¡t' : 'táº¡m ngÆ°ng'} tráº¡m`, status: stop.status });
     } catch (err) {
         console.error('Error toggling stop status:', err);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -1526,18 +2491,18 @@ router.get('/admin/lost-found', authMiddleware, async (req, res) => {
         const reports = await LostFound.find().sort({ date: -1 });
         res.json({ ok: true, reports });
     } catch (err) {
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
 router.post('/admin/lost-found', authMiddleware, async (req, res) => {
     try {
         const { description, location, reporter, phone, date, notes } = req.body;
-        if (!description || !location) return res.status(400).json({ ok: false, message: 'Mô tả và vị trí là bắt buộc' });
+        if (!description || !location) return res.status(400).json({ ok: false, message: 'MÃ´ táº£ vÃ  vá»‹ trÃ­ lÃ  báº¯t buá»™c' });
         const report = await LostFound.create({ description, location, reporter, phone, date, notes });
-        res.json({ ok: true, message: 'Đã ghi nhận báo cáo', report });
+        res.json({ ok: true, message: 'ÄÃ£ ghi nháº­n bÃ¡o cÃ¡o', report });
     } catch (err) {
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -1547,15 +2512,15 @@ router.post('/admin/lost-found', authMiddleware, async (req, res) => {
 
 /**
  * POST /api/feedback
- * Hành khách gửi phản hồi / khiếu nại / đánh giá
- * Auth: Optional (nếu đã đăng nhập sẽ gắn userId)
+ * HÃ nh khÃ¡ch gá»­i pháº£n há»“i / khiáº¿u náº¡i / Ä‘Ã¡nh giÃ¡
+ * Auth: Optional (náº¿u Ä‘Ã£ Ä‘Äƒng nháº­p sáº½ gáº¯n userId)
  */
 router.post('/feedback', authMiddleware, async (req, res) => {
     try {
         const { subject, message, rating, category } = req.body;
 
         if (!message || !String(message).trim()) {
-            return res.status(400).json({ ok: false, message: 'Nội dung phản hồi là bắt buộc' });
+            return res.status(400).json({ ok: false, message: 'Ná»™i dung pháº£n há»“i lÃ  báº¯t buá»™c' });
         }
 
         const user = await User.findById(req.user.userId).select('fullName email phone').lean();
@@ -1571,16 +2536,16 @@ router.post('/feedback', authMiddleware, async (req, res) => {
             category: category || 'COMPLAINT',
         });
 
-        res.json({ ok: true, message: 'Đã ghi nhận phản hồi của bạn', feedback: doc });
+        res.json({ ok: true, message: 'ÄÃ£ ghi nháº­n pháº£n há»“i cá»§a báº¡n', feedback: doc });
     } catch (err) {
         console.error('Error creating feedback:', err);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
 /**
  * GET /api/admin/feedback
- * Admin xem danh sách phản hồi khách hàng
+ * Admin xem danh sÃ¡ch pháº£n há»“i khÃ¡ch hÃ ng
  * Query: status (optional)
  */
 router.get('/admin/feedback', authMiddleware, async (req, res) => {
@@ -1606,13 +2571,13 @@ router.get('/admin/feedback', authMiddleware, async (req, res) => {
         res.json({ ok: true, feedback: items });
     } catch (err) {
         console.error('Error fetching feedback for admin:', err);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
 /**
  * POST /api/admin/feedback/:id/reply
- * Admin trả lời / cập nhật trạng thái phản hồi
+ * Admin tráº£ lá»i / cáº­p nháº­t tráº¡ng thÃ¡i pháº£n há»“i
  * Body: { replyText, status }
  */
 router.post('/admin/feedback/:id/reply', authMiddleware, async (req, res) => {
@@ -1635,7 +2600,7 @@ router.post('/admin/feedback/:id/reply', authMiddleware, async (req, res) => {
         if (status && ['NEW', 'IN_PROGRESS', 'RESPONDED', 'CLOSED'].includes(status)) {
             update.status = status;
         } else if (replyText !== undefined && !status) {
-            // Nếu có trả lời nhưng không gửi status, mặc định chuyển sang RESPONDED
+            // Náº¿u cÃ³ tráº£ lá»i nhÆ°ng khÃ´ng gá»­i status, máº·c Ä‘á»‹nh chuyá»ƒn sang RESPONDED
             update.status = 'RESPONDED';
         }
 
@@ -1645,13 +2610,13 @@ router.post('/admin/feedback/:id/reply', authMiddleware, async (req, res) => {
             .lean();
 
         if (!doc) {
-            return res.status(404).json({ ok: false, message: 'Không tìm thấy phản hồi' });
+            return res.status(404).json({ ok: false, message: 'KhÃ´ng tÃ¬m tháº¥y pháº£n há»“i' });
         }
 
-        res.json({ ok: true, message: 'Đã cập nhật phản hồi', feedback: doc });
+        res.json({ ok: true, message: 'ÄÃ£ cáº­p nháº­t pháº£n há»“i', feedback: doc });
     } catch (err) {
         console.error('Error replying feedback:', err);
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -1659,19 +2624,19 @@ router.put('/admin/lost-found/:id', authMiddleware, async (req, res) => {
     try {
         const { status, notes } = req.body;
         const report = await LostFound.findByIdAndUpdate(req.params.id, { status, notes }, { new: true });
-        if (!report) return res.status(404).json({ ok: false, message: 'Không tìm thấy báo cáo' });
-        res.json({ ok: true, message: 'Đã cập nhật báo cáo', report });
+        if (!report) return res.status(404).json({ ok: false, message: 'KhÃ´ng tÃ¬m tháº¥y bÃ¡o cÃ¡o' });
+        res.json({ ok: true, message: 'ÄÃ£ cáº­p nháº­t bÃ¡o cÃ¡o', report });
     } catch (err) {
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
 router.delete('/admin/lost-found/:id', authMiddleware, async (req, res) => {
     try {
         await LostFound.findByIdAndDelete(req.params.id);
-        res.json({ ok: true, message: 'Đã xóa báo cáo' });
+        res.json({ ok: true, message: 'ÄÃ£ xÃ³a bÃ¡o cÃ¡o' });
     } catch (err) {
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -1696,7 +2661,7 @@ router.get('/driver/schedule', authMiddleware, async (req, res) => {
             .sort({ date: -1 });
         res.json({ ok: true, schedules });
     } catch (err) {
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -1717,46 +2682,46 @@ router.get('/conductor/schedule', authMiddleware, async (req, res) => {
             .sort({ date: -1 });
         res.json({ ok: true, schedules });
     } catch (err) {
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
 /**
  * POST /api/tickets/purchase
- * Mua vé lẻ theo chuyến (trừ ví)
+ * Mua vÃ© láº» theo chuyáº¿n (trá»« vÃ­)
  * Body: { scheduleId, seatLabel }
  */
 router.post('/tickets/purchase', authMiddleware, async (req, res) => {
     try {
         const { scheduleId, seatLabel } = req.body;
         if (!scheduleId || !seatLabel) {
-            return res.status(400).json({ ok: false, message: 'Thiếu scheduleId hoặc số ghế' });
+            return res.status(400).json({ ok: false, message: 'Thiáº¿u scheduleId hoáº·c sá»‘ gháº¿' });
         }
         const user = await User.findById(req.user.userId).select('walletBalance fullName');
-        if (!user) return res.status(404).json({ ok: false, message: 'Người dùng không tồn tại' });
+        if (!user) return res.status(404).json({ ok: false, message: 'NgÆ°á»i dÃ¹ng khÃ´ng tá»“n táº¡i' });
         const schedule = await Schedule.findById(scheduleId).populate('routeId', 'routeNumber name monthlyPassPrice status');
-        if (!schedule) return res.status(404).json({ ok: false, message: 'Không tìm thấy chuyến xe' });
+        if (!schedule) return res.status(404).json({ ok: false, message: 'KhÃ´ng tÃ¬m tháº¥y chuyáº¿n xe' });
         if (['COMPLETED', 'CANCELLED'].includes(schedule.status)) {
-            return res.status(400).json({ ok: false, message: 'Chuyến đã kết thúc hoặc hủy' });
+            return res.status(400).json({ ok: false, message: 'Chuyáº¿n Ä‘Ã£ káº¿t thÃºc hoáº·c há»§y' });
         }
         const existedSeat = await TripTicket.findOne({
             scheduleId: schedule._id,
             seatLabel: String(seatLabel).trim().toUpperCase(),
             status: { $in: ['BOOKED', 'USED'] }
         }).lean();
-        if (existedSeat) return res.status(400).json({ ok: false, message: 'Ghế đã được đặt trong chuyến này' });
+        if (existedSeat) return res.status(400).json({ ok: false, message: 'Gháº¿ Ä‘Ã£ Ä‘Æ°á»£c Ä‘áº·t trong chuyáº¿n nÃ y' });
 
         const routePrice = Number(schedule.routeId?.monthlyPassPrice || 0);
         const ticketPrice = Math.max(5000, Math.round(routePrice > 0 ? routePrice / 30 : 7000));
         if ((user.walletBalance || 0) < ticketPrice) {
-            return res.status(400).json({ ok: false, message: 'Số dư ví không đủ để mua vé lẻ' });
+            return res.status(400).json({ ok: false, message: 'Sá»‘ dÆ° vÃ­ khÃ´ng Ä‘á»§ Ä‘á»ƒ mua vÃ© láº»' });
         }
         const userAfterDeduct = await User.findOneAndUpdate(
             { _id: user._id, walletBalance: { $gte: ticketPrice } },
             { $inc: { walletBalance: -ticketPrice } },
             { new: true }
         );
-        if (!userAfterDeduct) return res.status(400).json({ ok: false, message: 'Giao dịch thất bại, vui lòng thử lại' });
+        if (!userAfterDeduct) return res.status(400).json({ ok: false, message: 'Giao dá»‹ch tháº¥t báº¡i, vui lÃ²ng thá»­ láº¡i' });
 
         const code = `TK-${schedule._id.toString().slice(-6).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
         const ticket = await TripTicket.create({
@@ -1773,19 +2738,19 @@ router.post('/tickets/purchase', authMiddleware, async (req, res) => {
             amount: ticketPrice,
             direction: 'OUT',
             txnType: 'TICKET',
-            note: `Vé lẻ chuyến ${schedule.routeId?.routeNumber || ''} - ghế ${ticket.seatLabel}`,
+            note: `VÃ© láº» chuyáº¿n ${schedule.routeId?.routeNumber || ''} - gháº¿ ${ticket.seatLabel}`,
             method: 'WALLET',
             status: 'SUCCESS'
         });
         return res.json({
             ok: true,
-            message: 'Mua vé lẻ thành công',
+            message: 'Mua vÃ© láº» thÃ nh cÃ´ng',
             ticket,
             newBalance: userAfterDeduct.walletBalance
         });
     } catch (err) {
         console.error('Error purchasing ticket:', err);
-        return res.status(500).json({ ok: false, message: 'Lỗi server' });
+        return res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -1796,12 +2761,12 @@ router.post('/tickets/purchase', authMiddleware, async (req, res) => {
 router.post('/driver/incident', authMiddleware, async (req, res) => {
     try {
         const { type, location, details, severity } = req.body;
-        if (!location) return res.status(400).json({ ok: false, message: 'Vị trí là bắt buộc' });
+        if (!location) return res.status(400).json({ ok: false, message: 'Vá»‹ trÃ­ lÃ  báº¯t buá»™c' });
         // Log to console (extend with Incident model if needed)
         console.log(`[INCIDENT] driver=${req.user.userId} type=${type} severity=${severity} loc="${location}" details="${details}"`);
-        res.json({ ok: true, message: 'Đã nhận báo cáo sự cố. Trung tâm sẽ xử lý ngay.' });
+        res.json({ ok: true, message: 'ÄÃ£ nháº­n bÃ¡o cÃ¡o sá»± cá»‘. Trung tÃ¢m sáº½ xá»­ lÃ½ ngay.' });
     } catch (err) {
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -1813,9 +2778,9 @@ router.post('/driver/confirm-handover', authMiddleware, async (req, res) => {
     try {
         const { scheduleId } = req.body;
         console.log(`[HANDOVER] driver=${req.user.userId} schedule=${scheduleId} at=${new Date().toISOString()}`);
-        res.json({ ok: true, message: 'Đã xác nhận nhận xe.' });
+        res.json({ ok: true, message: 'ÄÃ£ xÃ¡c nháº­n nháº­n xe.' });
     } catch (err) {
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
@@ -1828,10 +2793,10 @@ router.post('/conductor/validate-qr', authMiddleware, async (req, res) => {
     try {
         const role = req.user?.role;
         if (!['CONDUCTOR', 'DRIVER', 'ADMIN', 'STAFF'].includes(role)) {
-            return res.status(403).json({ ok: false, message: 'Chỉ tài xế, phụ xe hoặc nhân viên mới quét được vé' });
+            return res.status(403).json({ ok: false, message: 'Chá»‰ tÃ i xáº¿, phá»¥ xe hoáº·c nhÃ¢n viÃªn má»›i quÃ©t Ä‘Æ°á»£c vÃ©' });
         }
         const { code } = req.body;
-        if (!code) return res.status(400).json({ ok: false, message: 'Mã QR không được để trống' });
+        if (!code) return res.status(400).json({ ok: false, message: 'MÃ£ QR khÃ´ng Ä‘Æ°á»£c Ä‘á»ƒ trá»‘ng' });
 
         const token = code.trim();
         const looksLikeObjectId = /^[a-fA-F0-9]{24}$/.test(token);
@@ -1850,23 +2815,23 @@ router.post('/conductor/validate-qr', authMiddleware, async (req, res) => {
         if (pass) {
             const now = new Date();
             if (pass.status && pass.status !== 'ACTIVE') {
-                return res.json({ ok: false, message: `Vé tháng không còn hiệu lực (${pass.status})` });
+                return res.json({ ok: false, message: `VÃ© thÃ¡ng khÃ´ng cÃ²n hiá»‡u lá»±c (${pass.status})` });
             }
             const validTo = pass.validTo || pass.endDate;
             if (validTo && new Date(validTo) < now) {
-                return res.json({ ok: false, message: `Vé đã hết hạn (${new Date(validTo).toLocaleDateString('vi-VN')})` });
+                return res.json({ ok: false, message: `VÃ© Ä‘Ã£ háº¿t háº¡n (${new Date(validTo).toLocaleDateString('vi-VN')})` });
             }
             const validFrom = pass.validFrom;
             if (validFrom && new Date(validFrom) > now) {
-                return res.json({ ok: false, message: `Vé chưa đến ngày hiệu lực (${new Date(validFrom).toLocaleDateString('vi-VN')})` });
+                return res.json({ ok: false, message: `VÃ© chÆ°a Ä‘áº¿n ngÃ y hiá»‡u lá»±c (${new Date(validFrom).toLocaleDateString('vi-VN')})` });
             }
             return res.json({
                 ok: true,
                 ticketType: 'MONTHLY_PASS',
-                message: 'Vé tháng hợp lệ',
+                message: 'VÃ© thÃ¡ng há»£p lá»‡',
                 passengerName: pass.userId?.fullName,
                 routeNumber: pass.routeId?.routeNumber || pass.routeSnapshot?.routeNumber,
-                validUntil: validTo ? new Date(validTo).toLocaleDateString('vi-VN') : 'Không giới hạn',
+                validUntil: validTo ? new Date(validTo).toLocaleDateString('vi-VN') : 'KhÃ´ng giá»›i háº¡n',
                 passCode: pass.passCode
             });
         }
@@ -1876,10 +2841,10 @@ router.post('/conductor/validate-qr', authMiddleware, async (req, res) => {
             .populate('routeId', 'routeNumber name')
             .populate('scheduleId', 'date departureTime shiftTime status');
         if (!ticket) {
-            return res.json({ ok: false, message: 'Mã vé không tồn tại hoặc không hợp lệ' });
+            return res.json({ ok: false, message: 'MÃ£ vÃ© khÃ´ng tá»“n táº¡i hoáº·c khÃ´ng há»£p lá»‡' });
         }
-        if (ticket.status === 'CANCELLED') return res.json({ ok: false, message: 'Vé đã bị hủy' });
-        if (ticket.status === 'USED') return res.json({ ok: false, message: 'Vé đã được sử dụng' });
+        if (ticket.status === 'CANCELLED') return res.json({ ok: false, message: 'VÃ© Ä‘Ã£ bá»‹ há»§y' });
+        if (ticket.status === 'USED') return res.json({ ok: false, message: 'VÃ© Ä‘Ã£ Ä‘Æ°á»£c sá»­ dá»¥ng' });
 
         ticket.status = 'USED';
         ticket.usedAt = new Date();
@@ -1888,16 +2853,18 @@ router.post('/conductor/validate-qr', authMiddleware, async (req, res) => {
         res.json({
             ok: true,
             ticketType: 'TRIP_TICKET',
-            message: 'Vé lẻ hợp lệ',
+            message: 'VÃ© láº» há»£p lá»‡',
             passengerName: ticket.userId?.fullName,
             routeNumber: ticket.routeId?.routeNumber,
             seatLabel: ticket.seatLabel,
             tripTime: ticket.scheduleId?.departureTime || ticket.scheduleId?.shiftTime?.start || 'N/A'
         });
     } catch (err) {
-        res.status(500).json({ ok: false, message: 'Lỗi server' });
+        res.status(500).json({ ok: false, message: 'Lá»—i server' });
     }
 });
 
 module.exports = router;
+
+
 

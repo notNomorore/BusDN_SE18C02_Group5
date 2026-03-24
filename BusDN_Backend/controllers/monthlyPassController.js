@@ -472,13 +472,23 @@ function addMinutesVnp(date = new Date(), minutes = 15) {
 }
 
 function getClientIp(req) {
-    return (
+    const rawIp = (
         req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
         req.connection?.remoteAddress ||
         req.socket?.remoteAddress ||
         req.ip ||
         "127.0.0.1"
     );
+
+    if (!rawIp || rawIp === "::1" || rawIp === "::") {
+        return "127.0.0.1";
+    }
+
+    if (String(rawIp).startsWith("::ffff:")) {
+        return String(rawIp).replace("::ffff:", "");
+    }
+
+    return String(rawIp);
 }
 
 function getVnpayBaseConfig(req) {
@@ -967,11 +977,29 @@ exports.purchaseMonthlyPass = async (req, res) => {
         // ================= VNPAY =================
         if (paymentMethod === PAYMENT_METHOD.VNPAY) {
             const { tmnCode, hashSecret, vnpUrl, returnUrl } = getVnpayBaseConfig(req);
+            const createDate = formatDateVnp(new Date());
+            const expireDate = addMinutesVnp(new Date(), 15);
+            const orderInfo = [
+                "Thanh toan ve thang",
+                passType === PASS_TYPE.INTER_ROUTE ? "lien tuyen" : "don tuyen",
+                `ky ${pad2(month)}/${year}`,
+                txnRef
+            ].join(" - ");
 
             const vnpParams = {
+                vnp_Version: "2.1.0",
+                vnp_Command: "pay",
+                vnp_TmnCode: tmnCode,
+                vnp_Locale: "vn",
+                vnp_CurrCode: "VND",
                 vnp_TxnRef: txnRef,
-                vnp_Amount: finalPrice * 100,
-                vnp_ReturnUrl: returnUrl
+                vnp_OrderInfo: orderInfo,
+                vnp_OrderType: "other",
+                vnp_Amount: Math.round(finalPrice * 100),
+                vnp_ReturnUrl: returnUrl,
+                vnp_IpAddr: getClientIp(req),
+                vnp_CreateDate: createDate,
+                vnp_ExpireDate: expireDate
             };
 
             const url = buildVnpUrl(vnpUrl, vnpParams, hashSecret);

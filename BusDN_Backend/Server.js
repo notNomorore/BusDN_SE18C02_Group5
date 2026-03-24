@@ -43,6 +43,16 @@ io.on('connection', (socket) => {
         socket.join('admins');
     });
 
+    socket.on('tracking:subscribe-route', ({ routeId }) => {
+        if (!routeId || typeof routeId !== 'string') return;
+        socket.join(`route:${routeId}`);
+    });
+
+    socket.on('tracking:unsubscribe-route', ({ routeId }) => {
+        if (!routeId || typeof routeId !== 'string') return;
+        socket.leave(`route:${routeId}`);
+    });
+
     socket.on('auth:join', ({ token }) => {
         try {
             if (!token || typeof token !== 'string') return;

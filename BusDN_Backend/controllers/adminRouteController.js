@@ -223,6 +223,13 @@ function buildRouteViewModel(route) {
   };
 }
 
+function buildRouteNameFromStops(startStop, endStop) {
+  const startName = clean(startStop?.name);
+  const endName = clean(endStop?.name);
+  if (!startName || !endName) return '';
+  return `${startName} - ${endName}`;
+}
+
 async function buildStopLookup(stopIds, { activeOnly = false } = {}) {
   const uniqueIds = [...new Set(stopIds.filter(Boolean))];
   const objectIds = [];
@@ -356,6 +363,7 @@ async function validateCreatePayload(formData, mode) {
   const strict = mode === 'SUBMIT_REVIEW';
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  let routeName = '';
 
   if (!formData.routeCode) {
     errors.push('routeCode là bắt buộc.');
@@ -368,14 +376,27 @@ async function validateCreatePayload(formData, mode) {
     }
   }
 
-  if (strict && !formData.routeName) errors.push('routeName là bắt buộc.');
   if (strict && !formData.startPoint) errors.push('startPoint là bắt buộc.');
   if (strict && !formData.endPoint) errors.push('endPoint là bắt buộc.');
   if (formData.startPoint && formData.endPoint && formData.startPoint === formData.endPoint) {
     errors.push('startPoint và endPoint không được trùng nhau.');
   }
 
+  if (formData.startPoint && formData.endPoint && formData.startPoint !== formData.endPoint) {
+    const endpointLookup = await buildStopLookup([formData.startPoint, formData.endPoint], { activeOnly: strict });
+    if (!endpointLookup) {
+      errors.push('Điểm đầu hoặc điểm cuối không hợp lệ.');
+    } else {
+      const startStop = endpointLookup.get(String(formData.startPoint));
+      const endStop = endpointLookup.get(String(formData.endPoint));
+      if (!startStop) errors.push('Điểm đầu không tồn tại hoặc đang tạm ngưng.');
+      if (!endStop) errors.push('Điểm cuối không tồn tại hoặc đang tạm ngưng.');
+      routeName = buildRouteNameFromStops(startStop, endStop);
+    }
+  }
+
   if (strict) {
+    if (!routeName) errors.push('Không thể tạo tên tuyến. Vui lòng chọn đủ điểm đầu và điểm cuối hợp lệ.');
     if (!formData.effectiveDate || !parseDateOrNull(formData.effectiveDate)) {
       errors.push('effectiveDate là bắt buộc khi submit review.');
     } else if (parseDateOrNull(formData.effectiveDate) < today) {
@@ -408,6 +429,7 @@ async function validateCreatePayload(formData, mode) {
 
   return {
     errors,
+    routeName,
     outboundStops: outbound.normalizedStops,
     inboundStops: inbound.normalizedStops
   };
@@ -540,7 +562,6 @@ exports.createRoute = async (req, res) => {
     const intent = clean(req.body.intent).toLowerCase() === 'submit_review' ? 'SUBMIT_REVIEW' : 'SAVE_DRAFT';
     const formData = makeRouteCreateFormData({
       routeCode: req.body.routeCode,
-      routeName: req.body.routeName,
       routeType: req.body.routeType,
       serviceType: req.body.serviceType,
       startPoint: req.body.startPoint,
@@ -558,7 +579,8 @@ exports.createRoute = async (req, res) => {
       inboundStops: normalizeDirectionStops(req.body.inboundStopsJson)
     });
 
-    const { errors, outboundStops, inboundStops } = await validateCreatePayload(formData, intent);
+    const { errors, routeName, outboundStops, inboundStops } = await validateCreatePayload(formData, intent);
+    formData.routeName = routeName || formData.routeName;
 
     if (errors.length) {
       const availableStops = await loadStopsForAdmin();
@@ -599,7 +621,7 @@ exports.createRoute = async (req, res) => {
 
     await Route.create({
       routeNumber: formData.routeCode,
-      name: formData.routeName,
+      name: routeName || formData.routeName,
       routeType: formData.routeType,
       serviceType: formData.serviceType,
       description: formData.description,
@@ -654,7 +676,6 @@ exports.createRoute = async (req, res) => {
     const availableStops = await loadStopsForAdmin().catch(() => []);
     const formData = makeRouteCreateFormData({
       routeCode: req.body.routeCode,
-      routeName: req.body.routeName,
       routeType: req.body.routeType,
       serviceType: req.body.serviceType,
       startPoint: req.body.startPoint,

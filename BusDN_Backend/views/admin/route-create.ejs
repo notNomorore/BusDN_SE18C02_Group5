@@ -24,7 +24,8 @@ const optionText = (value) => ({
     .route-form-section { border: 1px solid #dee2e6; border-radius: 12px; box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,.05); }
     .route-direction-empty { border: 1px dashed #ced4da; border-radius: 12px; padding: 16px; text-align: center; color: #6c757d; background: #fafbfc; }
     .route-workflow-box { background: #f8f9fa; }
-    .route-action-bar { position: sticky; bottom: 0; z-index: 5; background: rgba(248,249,250,.98); backdrop-filter: blur(8px); border-top: 1px solid #dee2e6; padding: 16px 0 0; }
+    #createBusRouteForm { padding-bottom: 32px; }
+    .route-action-bar { position: sticky; bottom: 0; z-index: 20; background: rgba(248,249,250,.98); backdrop-filter: blur(8px); border-top: 1px solid #dee2e6; box-shadow: 0 -8px 24px rgba(15, 23, 42, .08); padding: 16px 0 calc(16px + env(safe-area-inset-bottom, 0px)); margin-top: 12px; }
     .route-map-panel { position: sticky; top: 20px; }
     .route-map { height: 520px; border-radius: 12px; overflow: hidden; border: 1px solid #dee2e6; }
     .route-map-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; font-size: .95rem; }
@@ -53,7 +54,11 @@ const optionText = (value) => ({
             <h4 class="mb-3">1. Thông tin cơ bản</h4>
             <div class="row g-3">
                 <div class="col-md-4"><label class="form-label">Mã tuyến *</label><input type="text" name="routeCode" class="form-control" value="<%= form.routeCode || '' %>" required></div>
-                <div class="col-md-8"><label class="form-label">Tên tuyến</label><input type="text" name="routeName" class="form-control" value="<%= form.routeName || '' %>"></div>
+                <div class="col-md-8">
+                    <label class="form-label">Tên tuyến</label>
+                    <div class="form-control bg-light js-route-name-preview"><%= form.routeName || 'Tự động tạo từ điểm đầu và điểm cuối.' %></div>
+                    <div class="form-text">Hệ thống sẽ tự động ghép tên tuyến = Điểm đầu - Điểm cuối.</div>
+                </div>
                 <div class="col-md-6">
                     <label class="form-label">Điểm đầu</label>
                     <input type="text" class="form-control js-endpoint-search" data-endpoint="start" list="route-endpoint-options" placeholder="Nhập tên trạm hoặc địa chỉ...">
@@ -214,6 +219,18 @@ document.addEventListener('DOMContentLoaded', function () {
         editor.querySelector('.js-stop-search').value = stop ? stop.searchLabel : '';
         editor.querySelector('.js-stop-selected-text').textContent = stop ? `Đã chọn: ${formatStopLabel(stop)}` : 'Chưa chọn trạm.';
     }
+    function updateRouteNamePreview() {
+        const previewEl = document.querySelector('.js-route-name-preview');
+        if (!previewEl) return;
+        const startStopId = document.querySelector('.js-endpoint-id[data-endpoint="start"]')?.value || '';
+        const endStopId = document.querySelector('.js-endpoint-id[data-endpoint="end"]')?.value || '';
+        const startStop = stopMap.get(String(startStopId));
+        const endStop = stopMap.get(String(endStopId));
+
+        previewEl.textContent = (startStop && endStop)
+            ? `${startStop.name} - ${endStop.name}`
+            : 'Tự động tạo từ điểm đầu và điểm cuối.';
+    }
     function setEndpointSelection(endpointKey, stopId) {
         const searchInput = document.querySelector(`.js-endpoint-search[data-endpoint="${endpointKey}"]`);
         const hiddenInput = document.querySelector(`.js-endpoint-id[data-endpoint="${endpointKey}"]`);
@@ -224,6 +241,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (hiddenInput) hiddenInput.value = stop ? stop.id : '';
         if (searchInput) searchInput.value = stop ? stop.searchLabel : '';
         if (textEl) textEl.textContent = stop ? `Đã chọn: ${formatStopLabel(stop)}` : emptyText;
+        updateRouteNamePreview();
     }
     function bindEndpointSearch(endpointKey) {
         const searchInput = document.querySelector(`.js-endpoint-search[data-endpoint="${endpointKey}"]`);
@@ -243,6 +261,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     ? 'Chưa chọn điểm đầu.'
                     : 'Chưa chọn điểm cuối.';
             }
+            updateRouteNamePreview();
         }
 
         searchInput.addEventListener('input', syncEndpoint);
