@@ -147,11 +147,17 @@ const scopeText = (promo) => {
                         </td>
                         <td><span class="badge <%= statusBadge(promo.status) %>"><%= statusText(promo.status) %></span></td>
                         <td class="text-nowrap">
+                            <% if (promo.status !== 'ENDED' && promo.status !== 'CANCELLED') { %>
                             <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editPromotionModal-<%= idx %>">
                                 <i class="fas fa-edit"></i>
                             </button>
+                            <% } else { %>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled title="Chương trình đã kết thúc hoặc đã hủy">
+                                <i class="fas fa-lock"></i>
+                            </button>
+                            <% } %>
                             <% if (promo.status !== 'ENDED' && promo.status !== 'CANCELLED') { %>
-                            <form action="/admin/promotions/<%= promo._id %>/end-early" method="POST" class="d-inline" onsubmit="return confirm('Bạn có chắc muốn kết thúc sớm chương trình này?');">
+                            <form action="/admin/promotions/<%= promo._id %>/end-early" method="POST" class="d-inline js-end-early-form" data-promotion-name="<%= promo.name %>">
                                 <button type="submit" class="btn btn-sm btn-outline-danger" title="Kết thúc sớm">
                                     <i class="fas fa-stop-circle"></i>
                                 </button>
@@ -428,6 +434,34 @@ const scopeText = (promo) => {
         }
         syncRouteScope(form);
         syncPromotionDates(form);
+    });
+
+    document.querySelectorAll('.js-end-early-form').forEach(function (form) {
+        form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            const promotionName = form.dataset.promotionName || 'chương trình này';
+
+            if (!(window.Swal && typeof window.Swal.fire === 'function')) {
+                if (window.confirm(`Bạn có chắc muốn kết thúc sớm ${promotionName}?`)) {
+                    form.submit();
+                }
+                return;
+            }
+
+            window.Swal.fire({
+                icon: 'warning',
+                title: 'Xác nhận kết thúc sớm',
+                text: `Bạn có chắc muốn kết thúc sớm ${promotionName}?`,
+                showCancelButton: true,
+                confirmButtonText: 'Kết thúc',
+                cancelButtonText: 'Hủy',
+                reverseButtons: true
+            }).then(function (result) {
+                if (result.isConfirmed) {
+                    form.submit();
+                }
+            });
+        });
     });
 })();
 </script>

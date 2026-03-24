@@ -119,6 +119,16 @@ const optionText = (value) => ({
         </div>
     </div>
 
+    <div class="card route-form-section mb-4">
+        <div class="card-body">
+            <h4 class="mb-3">5. Cự ly tuyến</h4>
+            <div class="row g-3">
+                <div class="col-md-4"><label class="form-label">Cự ly (km)</label><input type="number" name="distance" min="0.1" step="0.1" class="form-control" value="<%= form.distance ?? '' %>" placeholder="VD: 12.5" required></div>
+                <div class="col-12"><div class="form-text">Bắt buộc nhập cự ly lớn hơn 0 trước khi lưu tuyến.</div></div>
+            </div>
+        </div>
+    </div>
+
     <div class="route-action-bar">
         <div class="d-flex justify-content-end gap-2 flex-wrap">
             <a href="/admin/routes" class="btn btn-light border">Hủy</a>
@@ -231,6 +241,28 @@ document.addEventListener('DOMContentLoaded', function () {
             ? `${startStop.name} - ${endStop.name}`
             : 'Tự động tạo từ điểm đầu và điểm cuối.';
     }
+    function showRouteNotice(message, options = {}) {
+        const title = options.title || 'Th?ng b?o';
+        const icon = options.icon || 'warning';
+        if (window.Swal && typeof window.Swal.fire === 'function') {
+            return window.Swal.fire({
+                icon,
+                title,
+                text: message,
+                confirmButtonText: '?? hi?u'
+            });
+        }
+        window.alert(message);
+        return Promise.resolve();
+    }
+    function validateDistinctEndpoints() {
+        const startStopId = document.querySelector('.js-endpoint-id[data-endpoint="start"]')?.value || '';
+        const endStopId = document.querySelector('.js-endpoint-id[data-endpoint="end"]')?.value || '';
+        if (!startStopId || !endStopId) return true;
+        if (String(startStopId) !== String(endStopId)) return true;
+        showRouteNotice('Điểm đầu và điểm cuối không được trùng nhau.');
+        return false;
+    }
     function setEndpointSelection(endpointKey, stopId) {
         const searchInput = document.querySelector(`.js-endpoint-search[data-endpoint="${endpointKey}"]`);
         const hiddenInput = document.querySelector(`.js-endpoint-id[data-endpoint="${endpointKey}"]`);
@@ -253,6 +285,9 @@ document.addEventListener('DOMContentLoaded', function () {
             const textEl = document.querySelector(`.js-endpoint-selected-text[data-endpoint="${endpointKey}"]`);
             if (stop) {
                 setEndpointSelection(endpointKey, stop.id);
+                if (!validateDistinctEndpoints()) {
+                    setEndpointSelection(endpointKey, '');
+                }
                 return;
             }
             if (hiddenInput) hiddenInput.value = '';
@@ -348,7 +383,7 @@ document.addEventListener('DOMContentLoaded', function () {
     function createStopRowMarkup(item, index) {
         const stop = stopMap.get(String(item.stopId || ''));
         const stopText = stop ? `${stop.name}${stop.address ? ' · ' + stop.address : ''}` : 'Trạm không xác định';
-        return `<tr data-stop-id="${String(item.stopId || '')}"><td><div class="fw-semibold">${index + 1}. ${stopText}</div><div class="small text-muted">Trạm trong hành trình</div></td><td><input type="number" class="form-control form-control-sm js-minutes" min="0" step="1" value="${Number(item.estimatedMinutesFromStart || 0)}"></td><td><input type="number" class="form-control form-control-sm js-distance" min="0" step="0.1" value="${Number(item.distanceFromStart || 0)}"></td><td class="text-center"><input type="checkbox" class="form-check-input js-pickup" ${item.pickupAllowed !== false ? 'checked' : ''}></td><td class="text-center"><input type="checkbox" class="form-check-input js-dropoff" ${item.dropoffAllowed !== false ? 'checked' : ''}></td><td><select class="form-select form-control-sm js-status">${stopStatuses.map((status) => `<option value="${status}" ${item.status === status ? 'selected' : ''}>${status}</option>`).join('')}</select></td><td class="text-nowrap"><div class="btn-group btn-group-sm"><button type="button" class="btn btn-outline-secondary js-move-up" ${index === 0 ? 'disabled' : ''}><i class="fas fa-arrow-up"></i></button><button type="button" class="btn btn-outline-secondary js-move-down"><i class="fas fa-arrow-down"></i></button><button type="button" class="btn btn-outline-danger js-remove-stop"><i class="fas fa-trash"></i></button></div></td></tr>`;
+        return `<tr data-stop-id="${String(item.stopId || '')}"><td><div class="fw-semibold">${index + 1}. ${stopText}</div><div class="small text-muted">Trạm trong hành trình</div></td><td><input type="number" class="form-control form-control-sm js-minutes" min="0" step="1" value="${Number(item.estimatedMinutesFromStart || 0)}"></td><td><input type="number" class="form-control form-control-sm js-distance" min="0" step="0.1" value="${Number(item.distanceFromStart || 0)}"></td><td class="text-nowrap"><div class="btn-group btn-group-sm"><button type="button" class="btn btn-outline-secondary js-move-up" ${index === 0 ? 'disabled' : ''}><i class="fas fa-arrow-up"></i></button><button type="button" class="btn btn-outline-secondary js-move-down"><i class="fas fa-arrow-down"></i></button><button type="button" class="btn btn-outline-danger js-remove-stop"><i class="fas fa-trash"></i></button></div></td></tr>`;
     }
     function bindSearch(editor) {
         const input = editor.querySelector('.js-stop-search');
@@ -371,7 +406,7 @@ document.addEventListener('DOMContentLoaded', function () {
         let stops = [];
         try { stops = JSON.parse(hiddenInput.value || '[]'); } catch (err) { stops = []; }
         function syncHidden() {
-            hiddenInput.value = JSON.stringify(stops.map((item, index) => ({ stopId: item.stopId, sequenceOrder: index + 1, estimatedMinutesFromStart: Number(item.estimatedMinutesFromStart || 0), distanceFromStart: Number(item.distanceFromStart || 0), pickupAllowed: item.pickupAllowed !== false, dropoffAllowed: item.dropoffAllowed !== false, status: item.status || 'ACTIVE' })));
+            hiddenInput.value = JSON.stringify(stops.map((item, index) => ({ stopId: item.stopId, sequenceOrder: index + 1, estimatedMinutesFromStart: Number(item.estimatedMinutesFromStart || 0), distanceFromStart: Number(item.distanceFromStart || 0), pickupAllowed: true, dropoffAllowed: true, status: 'ACTIVE' })));
             directionState[directionKey] = stops.slice();
             updateMap();
         }
@@ -382,9 +417,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 row.querySelector('.js-remove-stop').onclick = function () { stops.splice(index, 1); render(); };
                 row.querySelector('.js-minutes').oninput = function () { stops[index].estimatedMinutesFromStart = Number(this.value || 0); syncHidden(); };
                 row.querySelector('.js-distance').oninput = function () { stops[index].distanceFromStart = Number(this.value || 0); syncHidden(); };
-                row.querySelector('.js-pickup').onchange = function () { stops[index].pickupAllowed = this.checked; syncHidden(); };
-                row.querySelector('.js-dropoff').onchange = function () { stops[index].dropoffAllowed = this.checked; syncHidden(); };
-                row.querySelector('.js-status').onchange = function () { stops[index].status = this.value; syncHidden(); };
             });
         }
         function render() {
@@ -397,11 +429,11 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         editor.querySelector('.js-add-stop').addEventListener('click', function () {
             const selectedId = String(editor.querySelector('.js-stop-selected-id').value || '');
-            if (!selectedId) return window.alert('Vui lòng chọn một trạm từ ô tìm kiếm.');
+            if (!selectedId) return showRouteNotice('Vui lòng chọn một trạm từ ô tìm kiếm.');
             const stop = stopMap.get(selectedId);
             if (!stop) return;
-            if (stop.status !== 'ACTIVE') return window.alert('Chỉ có thể thêm trạm đang hoạt động vào hành trình.');
-            if (stops.some((item) => String(item.stopId || '') === selectedId)) return window.alert('Trạm này đã tồn tại trong chiều tuyến này.');
+            if (stop.status !== 'ACTIVE') return showRouteNotice('Chỉ có thể thêm trạm đang hoạt động vào hành trình.');
+            if (stops.some((item) => String(item.stopId || '') === selectedId)) return showRouteNotice('Trạm này đã tồn tại trong chiều tuyến này.');
             stops.push({ stopId: selectedId, sequenceOrder: stops.length + 1, estimatedMinutesFromStart: 0, distanceFromStart: 0, pickupAllowed: true, dropoffAllowed: true, status: 'ACTIVE' });
             setSelectedStop(editor, '');
             render();
@@ -447,6 +479,11 @@ document.addEventListener('DOMContentLoaded', function () {
     refreshSearchDatalists();
     bindEndpointSearch('start');
     bindEndpointSearch('end');
+    document.getElementById('createBusRouteForm')?.addEventListener('submit', function (event) {
+        if (!validateDistinctEndpoints()) {
+            event.preventDefault();
+        }
+    });
     document.querySelectorAll('.route-direction-editor').forEach(renderDirection);
 });
 </script>

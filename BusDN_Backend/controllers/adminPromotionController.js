@@ -66,10 +66,10 @@ async function validatePayload(payload, mode = 'create') {
     } else if (payload.endAt <= payload.startAt) {
         errors.push('Thời gian kết thúc phải lớn hơn thời gian bắt đầu.');
     } else {
-        if (payload.startAt < now) {
+        if (mode === 'create' && payload.startAt < now) {
             errors.push('Thời gian bắt đầu không được ở trong quá khứ.');
         }
-        if (payload.endAt < now) {
+        if (payload.endAt < now && payload.status !== 'ENDED' && payload.status !== 'CANCELLED') {
             errors.push('Thời gian kết thúc không được ở trong quá khứ.');
         }
     }

@@ -30,47 +30,47 @@
 
 <div class="priority-wrap">
     <div class="priority-header">
-        <h2 class="h4 mb-0"><i class="fas fa-id-card me-2 text-primary"></i>Priority Profiles</h2>
+        <h2 class="h4 mb-0"><i class="fas fa-id-card me-2 text-primary"></i>Hồ sơ ưu tiên</h2>
         <div class="d-flex gap-2">
-            <a href="/admin/priority-profiles" class="priority-chip <%= currentStatus === 'pending' ? 'active' : '' %>">Pending</a>
-            <a href="/admin/priority-profiles?status=approved" class="priority-chip <%= currentStatus === 'approved' ? 'active' : '' %>">Approved</a>
-            <a href="/admin/priority-profiles?status=rejected" class="priority-chip <%= currentStatus === 'rejected' ? 'active' : '' %>">Rejected</a>
+            <a href="/admin/priority-profiles" class="priority-chip <%= currentStatus === 'pending' ? 'active' : '' %>">Chờ duyệt</a>
+            <a href="/admin/priority-profiles?status=approved" class="priority-chip <%= currentStatus === 'approved' ? 'active' : '' %>">Đã duyệt</a>
+            <a href="/admin/priority-profiles?status=rejected" class="priority-chip <%= currentStatus === 'rejected' ? 'active' : '' %>">Từ chối</a>
         </div>
     </div>
 
     <% if (!profiles || profiles.length === 0) { %>
-        <div class="text-center text-muted py-5">No profiles found.</div>
+        <div class="text-center text-muted py-5">Không tìm thấy hồ sơ nào.</div>
     <% } else { %>
         <div class="table-responsive bg-white rounded shadow-sm">
             <table class="table table-hover align-middle mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th>User</th>
-                        <th>Category</th>
-                        <th>Status</th>
-                        <th>Submitted</th>
-                        <th class="text-center">Action</th>
+                        <th>Người dùng</th>
+                        <th>Nhóm ưu tiên</th>
+                        <th>Trạng thái</th>
+                        <th>Ngày gửi</th>
+                        <th class="text-center">Hành động</th>
                     </tr>
                 </thead>
                 <tbody>
                     <% profiles.forEach(profile => { %>
                         <tr>
                             <td>
-                                <div class="fw-semibold"><%= profile.userId?.fullName || 'N/A' %></div>
-                                <small class="text-muted"><%= profile.userId?.email || profile.userId?.phone || 'N/A' %></small>
+                                <div class="fw-semibold"><%= profile.userId?.fullName || 'Không có dữ liệu' %></div>
+                                <small class="text-muted"><%= profile.userId?.email || profile.userId?.phone || 'Không có dữ liệu' %></small>
                             </td>
                             <td><%= profile.category %></td>
                             <td>
                                 <span class="badge <%= profile.status === 'approved' ? 'bg-success' : profile.status === 'rejected' ? 'bg-danger' : 'bg-warning text-dark' %>">
-                                    <%= profile.status.toUpperCase() %>
+                                    <%= profile.status === 'approved' ? 'ĐÃ DUYỆT' : profile.status === 'rejected' ? 'TỪ CHỐI' : 'CHỜ DUYỆT' %>
                                 </span>
                             </td>
                             <td><small class="text-muted"><%= new Date(profile.createdAt).toLocaleDateString('vi-VN') %></small></td>
                             <td class="text-center">
-                                <a href="/admin/priority-profiles/<%= profile._id %>" class="btn btn-outline-primary btn-sm">View</a>
+                                <a href="/admin/priority-profiles/<%= profile._id %>" class="btn btn-outline-primary btn-sm">Xem</a>
                                 <% if (profile.status === 'pending') { %>
-                                    <button class="btn btn-success btn-sm" onclick="approveProfile('<%= profile._id %>')">Approve</button>
-                                    <button class="btn btn-danger btn-sm" onclick="rejectProfile('<%= profile._id %>')">Reject</button>
+                                    <button class="btn btn-success btn-sm" onclick="approveProfile('<%= profile._id %>')">Duyệt</button>
+                                    <button class="btn btn-danger btn-sm" onclick="rejectProfile('<%= profile._id %>')">Từ chối</button>
                                 <% } %>
                             </td>
                         </tr>
@@ -85,16 +85,16 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Approve Profile</h5>
+                <h5 class="modal-title">Duyệt hồ sơ</h5>
                 <button type="button" class="btn-close" onclick="closeApproveModal()"></button>
             </div>
             <div class="modal-body">
-                <label class="form-label">Expiry date (must be at least 2 years from now)</label>
+                <label class="form-label">Ngày hết hạn ưu tiên (ít nhất 2 năm kể từ hôm nay)</label>
                 <input type="date" id="expiryDate" class="form-control">
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" onclick="closeApproveModal()">Cancel</button>
-                <button type="button" class="btn btn-success" onclick="submitApprove()">Approve</button>
+                <button type="button" class="btn btn-secondary" onclick="closeApproveModal()">Hủy</button>
+                <button type="button" class="btn btn-success" onclick="submitApprove()">Duyệt</button>
             </div>
         </div>
     </div>
@@ -104,16 +104,16 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Reject Profile</h5>
+                <h5 class="modal-title">Từ chối hồ sơ</h5>
                 <button type="button" class="btn-close" onclick="closeRejectModal()"></button>
             </div>
             <div class="modal-body">
-                <label class="form-label">Reason</label>
+                <label class="form-label">Lý do từ chối</label>
                 <textarea id="rejectionReason" class="form-control" rows="4"></textarea>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" onclick="closeRejectModal()">Cancel</button>
-                <button type="button" class="btn btn-danger" onclick="submitReject()">Reject</button>
+                <button type="button" class="btn btn-secondary" onclick="closeRejectModal()">Hủy</button>
+                <button type="button" class="btn btn-danger" onclick="submitReject()">Từ chối</button>
             </div>
         </div>
     </div>
@@ -154,10 +154,10 @@
         })
         .then(res => res.json())
         .then((data) => {
-            if (!data.success) throw new Error(data.error || 'Approve failed');
+            if (!data.success) throw new Error(data.error || 'Không thể duyệt hồ sơ');
             window.location.reload();
         })
-        .catch((err) => alert(err.message));
+        .catch((err) => window.Swal ? Swal.fire({ icon: 'error', title: 'Lỗi', text: err.message }) : alert(err.message));
     }
 
     function rejectProfile(profileId) {
@@ -180,9 +180,9 @@
         })
         .then(res => res.json())
         .then((data) => {
-            if (!data.success) throw new Error(data.error || 'Reject failed');
+            if (!data.success) throw new Error(data.error || 'Không thể từ chối hồ sơ');
             window.location.reload();
         })
-        .catch((err) => alert(err.message));
+        .catch((err) => window.Swal ? Swal.fire({ icon: 'error', title: 'Lỗi', text: err.message }) : alert(err.message));
     }
 </script>

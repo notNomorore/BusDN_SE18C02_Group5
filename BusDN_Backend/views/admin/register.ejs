@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register - BusDN VIP PRO</title>
+    <title>Đăng ký - BusDN VIP PRO</title>
     <link rel="stylesheet" href="/css/auth-style.css">
     <style>
         .password-tooltip {
@@ -34,8 +34,8 @@
     <div class="auth-wrapper" style="background-image: url('https://images.unsplash.com/photo-1506057585558-8cf8f8d9f4e4?auto=format&fit=crop&w=1920&q=80');">
         <div class="glass-form">
             <span class="brand-tag">VIP PRO</span>
-            <h1 class="auth-title">Register</h1>
-            <p class="auth-subtitle">Create your BusDN account in a few steps.</p>
+            <h1 class="auth-title">Đăng ký</h1>
+            <p class="auth-subtitle">Tạo tài khoản BusDN chỉ với vài bước.</p>
 
             <% if (error) { %>
                 <div class="auth-alert error"><%= error %></div>
@@ -46,7 +46,7 @@
 
             <form action="/register" method="POST" id="registerForm">
                 <div class="auth-field">
-                    <label for="fullName">Full name</label>
+                    <label for="fullName">Họ và tên</label>
                     <input id="fullName" name="fullName" type="text" placeholder="Nguyen Van A" required>
                 </div>
                 <div class="auth-field">
@@ -54,43 +54,43 @@
                     <input id="email" name="email" type="email" placeholder="example@busdn.com" required>
                 </div>
                 <div class="auth-field">
-                    <label for="phone">Phone</label>
+                    <label for="phone">Số điện thoại</label>
                     <input id="phone" name="phone" type="tel" placeholder="+84..." required>
                 </div>
 
                 <div class="auth-field">
-                    <label>Phone verification</label>
+                    <label>Xác thực số điện thoại</label>
                     <div class="d-flex gap-2">
-                        <button type="button" class="auth-submit" id="sendPhoneOtpBtn" style="width:auto; border-radius:10px; text-transform:none;">Send OTP</button>
-                        <input id="phoneOtp" type="text" placeholder="OTP code" style="flex:1;" />
-                        <button type="button" class="auth-submit" id="verifyPhoneOtpBtn" style="width:auto; border-radius:10px; text-transform:none;">Verify</button>
+                        <button type="button" class="auth-submit" id="sendPhoneOtpBtn" style="width:auto; border-radius:10px; text-transform:none;">Gửi OTP</button>
+                        <input id="phoneOtp" type="text" placeholder="Mã OTP" style="flex:1;" />
+                        <button type="button" class="auth-submit" id="verifyPhoneOtpBtn" style="width:auto; border-radius:10px; text-transform:none;">Xác thực</button>
                     </div>
                     <div id="recaptcha-container" style="margin-top:8px;"></div>
-                    <div id="phoneStatus" class="auth-subtitle" style="margin-top:8px;">Phone not verified</div>
+                    <div id="phoneStatus" class="auth-subtitle" style="margin-top:8px;">Số điện thoại chưa được xác thực</div>
                     <input type="hidden" id="firebasePhoneVerified" name="firebasePhoneVerified" value="false">
                 </div>
 
                 <div class="auth-field">
-                    <label for="password">Password</label>
+                    <label for="password">Mật khẩu</label>
                     <input id="password" name="password" type="password" placeholder="••••••••" required>
                     <div id="passwordTooltip" class="password-tooltip">
-                        <strong>Password rules</strong>
-                        <div class="rule" id="req-length">At least 8 characters</div>
-                        <div class="rule" id="req-upper">At least 1 uppercase letter</div>
-                        <div class="rule" id="req-lower">At least 1 lowercase letter</div>
-                        <div class="rule" id="req-number">At least 1 number</div>
-                        <div class="rule" id="req-special">At least 1 special char (@$!%*?&)</div>
+                        <strong>Yêu cầu mật khẩu</strong>
+                        <div class="rule" id="req-length">Ít nhất 8 ký tự</div>
+                        <div class="rule" id="req-upper">Ít nhất 1 chữ in hoa</div>
+                        <div class="rule" id="req-lower">Ít nhất 1 chữ thường</div>
+                        <div class="rule" id="req-number">Ít nhất 1 chữ số</div>
+                        <div class="rule" id="req-special">Ít nhất 1 ký tự đặc biệt (@$!%*?&)</div>
                     </div>
                 </div>
                 <div class="auth-field">
-                    <label for="confirmPassword">Confirm password</label>
+                    <label for="confirmPassword">Xác nhận mật khẩu</label>
                     <input id="confirmPassword" name="confirmPassword" type="password" placeholder="••••••••" required>
                 </div>
-                <button class="auth-submit" type="submit" id="submitBtn" disabled>Register</button>
+                <button class="auth-submit" type="submit" id="submitBtn" disabled>Đăng ký</button>
             </form>
 
             <p class="auth-footnote">
-                Already have an account? <a href="/login" class="auth-link">Login</a>
+                Đã có tài khoản? <a href="/login" class="auth-link">Đăng nhập</a>
             </p>
         </div>
     </div>
@@ -163,7 +163,7 @@
             });
             const data = await response.json();
             if (!response.ok || !data.ok) {
-                throw new Error(data.message || 'Cannot persist verified phone');
+                throw new Error(data.message || 'Không thể lưu trạng thái xác thực số điện thoại');
             }
         }
 
@@ -172,15 +172,15 @@
             try {
                 const phone = phoneInput.value.trim();
                 if (!phone) {
-                    phoneStatus.textContent = 'Please input phone number';
+                    phoneStatus.textContent = 'Vui lòng nhập số điện thoại';
                     return;
                 }
 
                 const appVerifier = window.recaptchaVerifier;
                 confirmationResult = await firebase.auth().signInWithPhoneNumber(phone, appVerifier);
-                phoneStatus.textContent = 'OTP sent to phone';
+                phoneStatus.textContent = 'Đã gửi mã OTP đến số điện thoại';
             } catch (err) {
-                phoneStatus.textContent = err.message || 'Cannot send OTP';
+                phoneStatus.textContent = err.message || 'Không thể gửi mã OTP';
             }
         }
 
@@ -197,12 +197,12 @@
 
                 firebasePhoneVerified = true;
                 firebasePhoneVerifiedInput.value = 'true';
-                phoneStatus.textContent = 'Phone verified and saved successfully';
+                phoneStatus.textContent = 'Đã xác thực và lưu số điện thoại thành công';
                 updateSubmitState();
             } catch (err) {
                 firebasePhoneVerified = false;
                 firebasePhoneVerifiedInput.value = 'false';
-                phoneStatus.textContent = err.message || 'OTP verification failed';
+                phoneStatus.textContent = err.message || 'Xác thực OTP thất bại';
                 updateSubmitState();
             }
         }
@@ -212,7 +212,7 @@
         if (!hasFirebase) {
             sendPhoneOtpBtn.disabled = true;
             verifyPhoneOtpBtn.disabled = true;
-            phoneStatus.textContent = 'Firebase config missing in .env';
+            phoneStatus.textContent = 'Thiếu cấu hình Firebase trong .env';
         } else {
             firebase.initializeApp(firebaseConfig);
             window.recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptcha-container', {

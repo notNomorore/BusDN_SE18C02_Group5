@@ -13,6 +13,7 @@ const adminStopController = require('../controllers/adminStopController');
 const importUpload = multer({ storage: multer.memoryStorage() });
 const adminPromotionController = require('../controllers/adminPromotionController');
 const adminFareController = require('../controllers/adminFareController');
+const adminReportController = require('../controllers/adminReportController');
 
 // --- 2. TONG QUAN & HO SO ---
 router.get('/dashboard', isAdmin, (req, res) => renderAdmin(req, res, 'admin/dashboard', 'Tổng quan'));
@@ -59,6 +60,10 @@ router.post('/promotions/:id/end-early', isAdmin, adminPromotionController.endPr
 // --- 6.1 FINANCE/ADMIN: FARE MATRIX ---
 router.get('/fares', adminFareController.getFaresPage);
 router.post('/fares/update', adminFareController.updateFares);
+
+// --- 6.2 REPORTS ---
+router.get('/reports', isAdmin, adminReportController.getReportsPage);
+router.get('/reports/data', isAdmin, adminReportController.getRevenueReportData);
 
 // --- 7. QUAN LY NHAN SU ---
 router.get('/staff', isAdmin, adminController.getStaffList);

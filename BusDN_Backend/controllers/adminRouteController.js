@@ -1,4 +1,4 @@
-const { Route, Stop } = require('../models/models');
+const { Route, Stop, Schedule, TripTicket } = require('../models/models');
 const { renderAdmin } = require('../middleware/renderAdmin');
 // ===============================
 // Helpers
@@ -118,6 +118,7 @@ function makeRouteCreateFormData(input = {}) {
   return {
     routeCode,
     routeName: clean(input.routeName || input.name),
+    distance: input.distance ?? input.routeDistance ?? '',
     routeType: clean(input.routeType),
     serviceType: clean(input.serviceType),
     startPoint: clean(input.startPoint || (input.startStopId ? String(input.startStopId) : '')),
@@ -228,6 +229,35 @@ function buildRouteNameFromStops(startStop, endStop) {
   const endName = clean(endStop?.name);
   if (!startName || !endName) return '';
   return `${startName} - ${endName}`;
+}
+
+function normalizeCreateRouteErrorMessage(message) {
+  const text = String(message || '');
+  const mappings = [
+    [/^routeCode .*bat buoc\.$/i, 'Mã tuyến là bắt buộc.'],
+    [/^routeCode .*báº¯t buá»™c\.$/i, 'Mã tuyến là bắt buộc.'],
+    [/^routeCode "(.+)" .*tá»“n táº¡i\.$/i, 'Mã tuyến "$1" đã tồn tại.'],
+    [/^startPoint .*bat buoc\.$/i, 'Điểm đầu là bắt buộc.'],
+    [/^startPoint .*báº¯t buá»™c\.$/i, 'Điểm đầu là bắt buộc.'],
+    [/^endPoint .*bat buoc\.$/i, 'Điểm cuối là bắt buộc.'],
+    [/^endPoint .*báº¯t buá»™c\.$/i, 'Điểm cuối là bắt buộc.'],
+    [/^startPoint .* endPoint .*trung nhau\.$/i, 'Điểm đầu và điểm cuối không được trùng nhau.'],
+    [/^startPoint .* endPoint .*trÃ¹ng nhau\.$/i, 'Điểm đầu và điểm cuối không được trùng nhau.'],
+    [/^.*diá»ƒm .*khÃ´ng há»£p lá»‡\.$/i, 'Điểm đầu hoặc điểm cuối không hợp lệ.'],
+    [/^.*Ä‘iá»ƒm Ä‘áº§u .*táº¡m ngÆ°ng\.$/i, 'Điểm đầu không tồn tại hoặc đang tạm ngưng.'],
+    [/^.*Ä‘iá»ƒm cuá»‘i .*táº¡m ngÆ°ng\.$/i, 'Điểm cuối không tồn tại hoặc đang tạm ngưng.'],
+    [/^KhÃ´ng thá»ƒ táº¡o tÃªn tuyáº¿n\..*$/i, 'Không thể tạo tên tuyến. Vui lòng chọn đủ điểm đầu và điểm cuối hợp lệ.'],
+    [/^effectiveDate .*submit review\.$/i, 'Ngày hiệu lực là bắt buộc khi gửi duyệt.'],
+    [/^effectiveDate .*quÃ¡ khá»©\.$/i, 'Ngày hiệu lực không được ở trong quá khứ.'],
+    [/^effectiveDate .*há»£p lá»‡\.$/i, 'Ngày hiệu lực không hợp lệ.'],
+    [/^Cá»± ly .*0\.$/i, 'Cự ly là bắt buộc và phải lớn hơn 0.']
+  ];
+
+  for (const [pattern, replacement] of mappings) {
+    if (pattern.test(text)) return text.replace(pattern, replacement);
+  }
+
+  return text;
 }
 
 async function buildStopLookup(stopIds, { activeOnly = false } = {}) {
@@ -364,9 +394,15 @@ async function validateCreatePayload(formData, mode) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   let routeName = '';
+  const routeDistanceRaw = parseNumberOrNull(formData.distance);
+  const routeDistance = parsePositiveNumberOrNull(formData.distance);
 
   if (!formData.routeCode) {
     errors.push('routeCode là bắt buộc.');
+  }
+
+  if (routeDistanceRaw === null || routeDistanceRaw <= 0) {
+    errors.push('Cự ly là bắt buộc và phải lớn hơn 0.');
   }
 
   if (formData.routeCode) {
@@ -426,10 +462,12 @@ async function validateCreatePayload(formData, mode) {
   );
 
   errors.push(...outbound.errors, ...inbound.errors);
+  const normalizedErrors = errors.map(normalizeCreateRouteErrorMessage);
 
   return {
-    errors,
+    errors: normalizedErrors,
     routeName,
+    routeDistance,
     outboundStops: outbound.normalizedStops,
     inboundStops: inbound.normalizedStops
   };
@@ -461,6 +499,34 @@ function buildLegacyStops(outboundStops, inboundStops) {
   return [...outbound, ...inbound];
 }
 
+function normalizeStopSequence(rawValue) {
+  const rows = parseJsonArray(rawValue);
+  return rows.map((item) => clean(item)).filter(Boolean);
+}
+
+function buildDirectionStopsFromSequence(sequence, existingStops = []) {
+  const metadataMap = new Map(
+    (Array.isArray(existingStops) ? existingStops : [])
+      .filter((item) => item && item.stopId)
+      .map((item) => [String(item.stopId), item])
+  );
+
+  return sequence.map((stopId, index) => {
+    const previous = metadataMap.get(String(stopId)) || {};
+    return {
+      stopId,
+      sequenceOrder: index + 1,
+      estimatedMinutesFromStart: parsePositiveNumberOrNull(previous.estimatedMinutesFromStart) ?? 0,
+      distanceFromStart: parsePositiveNumberOrNull(previous.distanceFromStart) ?? 0,
+      pickupAllowed: previous.pickupAllowed !== false,
+      dropoffAllowed: previous.dropoffAllowed !== false,
+      status: ROUTE_STOP_STATUS.includes(clean(previous.status).toUpperCase())
+        ? clean(previous.status).toUpperCase()
+        : 'ACTIVE'
+    };
+  });
+}
+
 function buildAuditLog({ action, fromStatus = null, toStatus = null, message = '', req }) {
   return {
     action,
@@ -478,6 +544,55 @@ function deriveRouteDistance(outboundStops, inboundStops) {
   if (inboundStops.length) candidates.push(Number(inboundStops[inboundStops.length - 1].distanceFromStart || 0));
   const maxDistance = Math.max(0, ...candidates);
   return Number.isFinite(maxDistance) ? maxDistance : 0;
+}
+
+async function getRouteDeactivationBlockers(routeId) {
+  const activeSchedules = await Schedule.find({
+    routeId,
+    archived: { $ne: true },
+    status: { $in: ['SCHEDULED', 'IN_PROGRESS'] }
+  })
+    .select('_id status trackingActive passengerCount')
+    .lean();
+
+  const scheduleIds = activeSchedules.map((schedule) => schedule._id);
+  const runningSchedulesCount = activeSchedules.filter(
+    (schedule) =>
+      schedule.status === 'IN_PROGRESS' ||
+      schedule.trackingActive === true ||
+      Number(schedule.passengerCount || 0) > 0
+  ).length;
+
+  const activeTripTicketCount = scheduleIds.length
+    ? await TripTicket.countDocuments({
+      scheduleId: { $in: scheduleIds },
+      status: { $in: ['BOOKED', 'USED'] }
+    })
+    : 0;
+
+  return {
+    activeSchedulesCount: activeSchedules.length,
+    runningSchedulesCount,
+    activeTripTicketCount
+  };
+}
+
+async function validateRouteDeactivation(routeId) {
+  const blockers = await getRouteDeactivationBlockers(routeId);
+
+  if (blockers.runningSchedulesCount > 0) {
+    return `Không thể tạm ngưng tuyến vì đang có ${blockers.runningSchedulesCount} chuyến đang chạy hoặc đang chở khách.`;
+  }
+
+  if (blockers.activeTripTicketCount > 0) {
+    return `Không thể tạm ngưng tuyến vì còn ${blockers.activeTripTicketCount} vé lượt đã đặt/đang sử dụng trên các chuyến chưa hoàn tất.`;
+  }
+
+  if (blockers.activeSchedulesCount > 0) {
+    return `Không thể tạm ngưng tuyến vì còn ${blockers.activeSchedulesCount} chuyến đã được lên lịch.`;
+  }
+
+  return null;
 }
 
 exports.getCreateRoutePage = async (req, res) => {
@@ -562,6 +677,7 @@ exports.createRoute = async (req, res) => {
     const intent = clean(req.body.intent).toLowerCase() === 'submit_review' ? 'SUBMIT_REVIEW' : 'SAVE_DRAFT';
     const formData = makeRouteCreateFormData({
       routeCode: req.body.routeCode,
+      distance: req.body.distance,
       routeType: req.body.routeType,
       serviceType: req.body.serviceType,
       startPoint: req.body.startPoint,
@@ -579,7 +695,7 @@ exports.createRoute = async (req, res) => {
       inboundStops: normalizeDirectionStops(req.body.inboundStopsJson)
     });
 
-    const { errors, routeName, outboundStops, inboundStops } = await validateCreatePayload(formData, intent);
+    const { errors, routeName, routeDistance, outboundStops, inboundStops } = await validateCreatePayload(formData, intent);
     formData.routeName = routeName || formData.routeName;
 
     if (errors.length) {
@@ -616,8 +732,6 @@ exports.createRoute = async (req, res) => {
         req
       })
     ];
-
-    const routeDistance = deriveRouteDistance(outboundStops, inboundStops);
 
     await Route.create({
       routeNumber: formData.routeCode,
@@ -676,6 +790,7 @@ exports.createRoute = async (req, res) => {
     const availableStops = await loadStopsForAdmin().catch(() => []);
     const formData = makeRouteCreateFormData({
       routeCode: req.body.routeCode,
+      distance: req.body.distance,
       routeType: req.body.routeType,
       serviceType: req.body.serviceType,
       startPoint: req.body.startPoint,
@@ -717,8 +832,70 @@ exports.updateRoute = async (req, res) => {
     route.distance = parsePositiveNumberOrNull(req.body.distance) ?? route.distance;
     route.monthlyPassPrice = parsePositiveNumberOrNull(req.body.monthlyPassPrice) ?? route.monthlyPassPrice;
 
+    const outboundSequence = normalizeStopSequence(req.body.outboundSequence);
+    const inboundSequence = normalizeStopSequence(req.body.inboundSequence);
+    const outboundStops = buildDirectionStopsFromSequence(
+      outboundSequence,
+      route.directions?.outbound?.stops || mapLegacyStopsToView(route.toObject(), 'OUTBOUND')
+    );
+    const inboundStops = buildDirectionStopsFromSequence(
+      inboundSequence,
+      route.directions?.inbound?.stops || mapLegacyStopsToView(route.toObject(), 'INBOUND')
+    );
+
+    if (outboundSequence.length || inboundSequence.length) {
+      const [outboundValidation, inboundValidation] = await Promise.all([
+        validateDirection('đi', outboundStops, outboundSequence[0], outboundSequence[outboundSequence.length - 1], { strict: true }),
+        validateDirection('về', inboundStops, inboundSequence[0], inboundSequence[inboundSequence.length - 1], { strict: true })
+      ]);
+
+      const sequenceErrors = [...outboundValidation.errors, ...inboundValidation.errors];
+      if (outboundSequence.length < 2) sequenceErrors.push('Chiều đi phải có ít nhất 2 trạm.');
+      if (inboundSequence.length < 2) sequenceErrors.push('Chiều về phải có ít nhất 2 trạm.');
+      if (outboundSequence.length && inboundSequence.length) {
+        if (String(outboundSequence[0]) !== String(inboundSequence[inboundSequence.length - 1])) {
+          sequenceErrors.push('Chiều về phải kết thúc tại điểm đầu của chiều đi.');
+        }
+        if (String(outboundSequence[outboundSequence.length - 1]) !== String(inboundSequence[0])) {
+          sequenceErrors.push('Chiều về phải bắt đầu tại điểm cuối của chiều đi.');
+        }
+      }
+
+      if (sequenceErrors.length) {
+        setFlash(req, 'error', normalizeCreateRouteErrorMessage(sequenceErrors[0]));
+        return res.redirect('/admin/routes');
+      }
+
+      route.startStopId = outboundSequence[0] || route.startStopId;
+      route.endStopId = outboundSequence[outboundSequence.length - 1] || route.endStopId;
+      route.directions = {
+        outbound: {
+          directionKey: 'OUTBOUND',
+          startStopId: route.startStopId,
+          endStopId: route.endStopId,
+          stops: outboundStops
+        },
+        inbound: {
+          directionKey: 'INBOUND',
+          startStopId: inboundSequence[0] || route.endStopId,
+          endStopId: inboundSequence[inboundSequence.length - 1] || route.startStopId,
+          stops: inboundStops
+        }
+      };
+      route.stops = buildLegacyStops(outboundStops, inboundStops);
+    }
+
     const nextStatus = normalizeRouteListStatus(req.body.status);
-    if (nextStatus) route.status = nextStatus;
+    if (nextStatus) {
+      if (nextStatus === 'INACTIVE' && previousStatus !== 'INACTIVE') {
+        const deactivationError = await validateRouteDeactivation(route._id);
+        if (deactivationError) {
+          setFlash(req, 'error', deactivationError);
+          return res.redirect('/admin/routes');
+        }
+      }
+      route.status = nextStatus;
+    }
 
     const startTime = clean(req.body.startTime);
     const endTime = clean(req.body.endTime);
@@ -754,6 +931,12 @@ exports.deactivateRoute = async (req, res) => {
     const route = await Route.findById(id);
     if (!route) {
       setFlash(req, 'error', 'Không tìm thấy tuyến để tạm ngưng.');
+      return res.redirect('/admin/routes');
+    }
+
+    const deactivationError = await validateRouteDeactivation(route._id);
+    if (deactivationError) {
+      setFlash(req, 'error', deactivationError);
       return res.redirect('/admin/routes');
     }
 

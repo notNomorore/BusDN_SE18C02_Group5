@@ -40,6 +40,29 @@ const safe = (v) => (v === null || v === undefined) ? '' : v;
     font-size: 0.9rem;
     color: #6c757d;
   }
+
+  .stop-inline-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 32px;
+    transform: translateX(-50%) translateY(16px);
+    min-width: 280px;
+    max-width: min(560px, calc(100vw - 32px));
+    padding: 12px 16px;
+    border-radius: 12px;
+    background: rgba(33, 37, 41, 0.94);
+    color: #fff;
+    box-shadow: 0 16px 36px rgba(15, 23, 42, 0.22);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    z-index: 2000;
+  }
+
+  .stop-inline-toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
@@ -175,7 +198,7 @@ const safe = (v) => (v === null || v === undefined) ? '' : v;
                             <div class="row g-3">
                                 <div class="col-12">
                                     <label class="form-label">Tên trạm *</label>
-                                    <input type="text" name="name" class="form-control" required>
+                                    <input type="text" name="name" class="form-control js-stop-name" required>
                                 </div>
                                 <div class="col-12">
                                     <label class="form-label">Địa chỉ</label>
@@ -186,10 +209,13 @@ const safe = (v) => (v === null || v === undefined) ? '' : v;
                                     <div class="input-group">
                                         <input type="text" class="form-control js-stop-geocode-query" placeholder="Nhập địa chỉ hoặc tên địa điểm...">
                                         <button type="button" class="btn btn-outline-secondary js-stop-geocode-btn">
-                                            <i class="fas fa-search-location"></i> Tìm trên bản đồ
+                                            <i class="fas fa-search-location"></i> 
+                                        </button>
+                                        <button type="button" class="btn btn-outline-primary js-stop-quick-fill-btn">
+                                            <i class="fas fa-bolt"></i> Thêm trạm nhanh
                                         </button>
                                     </div>
-                                    <div class="form-text">Bạn có thể click lên bản đồ hoặc kéo marker để lấy tọa độ chính xác.</div>
+                                    <div class="form-text">Chỉ tìm trong khu vực Đà Nẵng. Nút "Thêm trạm nhanh" sẽ tự điền tên trạm, địa chỉ và tọa độ từ kết quả tìm kiếm.</div>
                                     <div class="alert alert-warning d-none mt-2 mb-0 js-stop-geocode-error"></div>
                                 </div>
                                 <div class="col-md-4">
@@ -241,7 +267,7 @@ const safe = (v) => (v === null || v === undefined) ? '' : v;
                             <div class="row g-3">
                                 <div class="col-12">
                                     <label class="form-label">Tên trạm *</label>
-                                    <input type="text" name="name" class="form-control" value="<%= safe(stop.name) %>" required>
+                                    <input type="text" name="name" class="form-control js-stop-name" value="<%= safe(stop.name) %>" required>
                                 </div>
                                 <div class="col-12">
                                     <label class="form-label">Địa chỉ</label>
@@ -254,8 +280,11 @@ const safe = (v) => (v === null || v === undefined) ? '' : v;
                                         <button type="button" class="btn btn-outline-secondary js-stop-geocode-btn">
                                             <i class="fas fa-search-location"></i> Tìm trên bản đồ
                                         </button>
+                                        <button type="button" class="btn btn-outline-primary js-stop-quick-fill-btn">
+                                            <i class="fas fa-bolt"></i> Thêm trạm nhanh
+                                        </button>
                                     </div>
-                                    <div class="form-text">Bạn có thể click lên bản đồ hoặc kéo marker để lấy tọa độ chính xác.</div>
+                                    <div class="form-text">Chỉ tìm trong khu vực Đà Nẵng. Nút "Thêm trạm nhanh" sẽ tự điền tên trạm, địa chỉ và tọa độ từ kết quả tìm kiếm.</div>
                                     <div class="alert alert-warning d-none mt-2 mb-0 js-stop-geocode-error"></div>
                                 </div>
                                 <div class="col-md-4">
@@ -292,11 +321,17 @@ const safe = (v) => (v === null || v === undefined) ? '' : v;
 </div>
 <% }) %>
 
+<div class="stop-inline-toast d-none js-stop-inline-toast" role="status" aria-live="polite"></div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const defaultCenter = [16.047079, 108.206230];
     const tileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+    const daNangViewBox = '107.8760,16.1850,108.3260,15.9750';
+    const daNangBounds = L.latLngBounds([15.9750, 107.8760], [16.1850, 108.3260]);
+    const inlineToast = document.querySelector('.js-stop-inline-toast');
+    let inlineToastTimer = null;
 
     function parseCoord(value) {
         if (value === null || value === undefined || value === '') return null;
@@ -309,23 +344,110 @@ document.addEventListener('DOMContentLoaded', function () {
         return Number(value).toFixed(6);
     }
 
+    function showInlineToast(message, duration = 2600) {
+        if (!inlineToast) return;
+        if (inlineToastTimer) {
+            window.clearTimeout(inlineToastTimer);
+            inlineToastTimer = null;
+        }
+
+        inlineToast.textContent = message;
+        inlineToast.classList.remove('d-none');
+        requestAnimationFrame(() => inlineToast.classList.add('show'));
+
+        inlineToastTimer = window.setTimeout(() => {
+            inlineToast.classList.remove('show');
+            window.setTimeout(() => inlineToast.classList.add('d-none'), 220);
+        }, duration);
+    }
+
     function setCoords(form, lat, lng) {
         form.querySelector('.js-stop-lat').value = formatCoord(lat);
         form.querySelector('.js-stop-lng').value = formatCoord(lng);
+    }
+
+    function buildStopNameFromResult(result) {
+        const nameParts = [];
+        if (result.address) {
+            const primary = result.address.road || result.address.pedestrian || result.address.neighbourhood || result.address.suburb || result.address.hamlet;
+            const district = result.address.city_district || result.address.town || result.address.city;
+            if (primary) nameParts.push(primary);
+            if (district && !nameParts.includes(district)) nameParts.push(district);
+        }
+        if (!nameParts.length && result.name) nameParts.push(result.name);
+        if (!nameParts.length && result.display_name) {
+            nameParts.push(String(result.display_name).split(',')[0].trim());
+        }
+        return nameParts.join(' - ').trim();
+    }
+
+    function buildAddressFromResult(result) {
+        if (result.display_name) return String(result.display_name).trim();
+        if (result.name) return String(result.name).trim();
+        return '';
+    }
+
+    function isWithinDaNang(lat, lng) {
+        return daNangBounds.contains([lat, lng]);
+    }
+
+    async function geocodeInDaNang(query) {
+        const scopedQuery = `${query}, Đà Nẵng, Việt Nam`;
+        const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&addressdetails=1&bounded=1&viewbox=${encodeURIComponent(daNangViewBox)}&q=${encodeURIComponent(scopedQuery)}`;
+        const response = await fetch(url, {
+            headers: { Accept: 'application/json' }
+        });
+
+        if (!response.ok) {
+            throw new Error('Không thể tìm địa điểm.');
+        }
+
+        const results = await response.json();
+        if (!Array.isArray(results) || !results.length) {
+            throw new Error('Không tìm thấy địa điểm phù hợp trong khu vực Đà Nẵng.');
+        }
+
+        const bestMatch = results.find((item) => {
+            const lat = parseCoord(item.lat);
+            const lng = parseCoord(item.lon);
+            return Number.isFinite(lat) && Number.isFinite(lng) && isWithinDaNang(lat, lng);
+        });
+
+        if (!bestMatch) {
+            throw new Error('Địa điểm tìm được nằm ngoài khu vực Đà Nẵng.');
+        }
+
+        const lat = parseCoord(bestMatch.lat);
+        const lng = parseCoord(bestMatch.lon);
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            throw new Error('Kết quả tìm kiếm không có tọa độ hợp lệ.');
+        }
+
+        return {
+            result: bestMatch,
+            lat,
+            lng,
+            suggestedName: buildStopNameFromResult(bestMatch),
+            suggestedAddress: buildAddressFromResult(bestMatch)
+        };
     }
 
     function initLocationForm(form) {
         const mapEl = form.querySelector('.js-stop-map');
         const latInput = form.querySelector('.js-stop-lat');
         const lngInput = form.querySelector('.js-stop-lng');
+        const nameInput = form.querySelector('.js-stop-name');
         const addressInput = form.querySelector('.js-stop-address');
         const queryInput = form.querySelector('.js-stop-geocode-query');
         const geocodeBtn = form.querySelector('.js-stop-geocode-btn');
+        const quickFillBtn = form.querySelector('.js-stop-quick-fill-btn');
         const geocodeError = form.querySelector('.js-stop-geocode-error');
         const modalEl = form.closest('.modal');
 
         const map = L.map(mapEl).setView(defaultCenter, 12);
         L.tileLayer(tileUrl, { attribution: '© OpenStreetMap contributors' }).addTo(map);
+        map.setMaxBounds(daNangBounds.pad(0.25));
 
         let marker = null;
 
@@ -335,73 +457,78 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         function showError(message) {
-            geocodeError.textContent = message;
-            geocodeError.classList.remove('d-none');
+            showInlineToast(message);
         }
 
         function placeMarker(lat, lng, zoom = true) {
+            if (!isWithinDaNang(lat, lng)) {
+                showError('Vị trí phải nằm trong khu vực Đà Nẵng.');
+                return;
+            }
+
             if (!marker) {
                 marker = L.marker([lat, lng], { draggable: true }).addTo(map);
                 marker.on('dragend', function () {
                     const pos = marker.getLatLng();
+                    if (!isWithinDaNang(pos.lat, pos.lng)) {
+                        marker.setLatLng(daNangBounds.getCenter());
+                        showError('Chỉ được chọn vị trí trong khu vực Đà Nẵng.');
+                        return;
+                    }
+                    hideError();
                     setCoords(form, pos.lat, pos.lng);
                 });
             } else {
                 marker.setLatLng([lat, lng]);
             }
 
+            hideError();
             setCoords(form, lat, lng);
             if (zoom) {
                 map.setView([lat, lng], 16);
             }
         }
 
-        map.on('click', function (event) {
-            hideError();
-            placeMarker(event.latlng.lat, event.latlng.lng, false);
-        });
-
-        geocodeBtn.addEventListener('click', async function () {
-            const query = (queryInput.value || addressInput.value || '').trim();
+        async function runGeocode({ quickFill = false } = {}) {
+            const query = (queryInput.value || addressInput.value || nameInput.value || '').trim();
             if (!query) {
                 showError('Vui lòng nhập địa chỉ hoặc tên địa điểm để tìm trên bản đồ.');
                 return;
             }
 
             geocodeBtn.disabled = true;
+            quickFillBtn.disabled = true;
             hideError();
 
             try {
-                const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`;
-                const response = await fetch(url, {
-                    headers: {
-                        'Accept': 'application/json'
+                const match = await geocodeInDaNang(query);
+                placeMarker(match.lat, match.lng, true);
+
+                if (quickFill) {
+                    if (!nameInput.value.trim()) {
+                        nameInput.value = match.suggestedName || '';
                     }
-                });
-
-                if (!response.ok) {
-                    throw new Error('Không thể tìm địa điểm.');
+                    addressInput.value = match.suggestedAddress || addressInput.value;
+                    queryInput.value = match.suggestedAddress || queryInput.value;
                 }
-
-                const results = await response.json();
-                if (!Array.isArray(results) || !results.length) {
-                    throw new Error('Không tìm thấy địa điểm phù hợp.');
-                }
-
-                const bestMatch = results[0];
-                const lat = parseCoord(bestMatch.lat);
-                const lng = parseCoord(bestMatch.lon);
-
-                if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-                    throw new Error('Kết quả tìm kiếm không có tọa độ hợp lệ.');
-                }
-
-                placeMarker(lat, lng, true);
             } catch (error) {
                 showError(error.message || 'Không thể tìm địa điểm.');
             } finally {
                 geocodeBtn.disabled = false;
+                quickFillBtn.disabled = false;
             }
+        }
+
+        map.on('click', function (event) {
+            placeMarker(event.latlng.lat, event.latlng.lng, false);
+        });
+
+        geocodeBtn.addEventListener('click', function () {
+            runGeocode({ quickFill: false });
+        });
+
+        quickFillBtn.addEventListener('click', function () {
+            runGeocode({ quickFill: true });
         });
 
         latInput.addEventListener('change', function () {
@@ -427,10 +554,10 @@ document.addEventListener('DOMContentLoaded', function () {
             const lat = parseCoord(latInput.value);
             const lng = parseCoord(lngInput.value);
 
-            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+            if (Number.isFinite(lat) && Number.isFinite(lng) && isWithinDaNang(lat, lng)) {
                 placeMarker(lat, lng, true);
             } else {
-                map.setView(defaultCenter, 12);
+                map.fitBounds(daNangBounds);
             }
         });
     }

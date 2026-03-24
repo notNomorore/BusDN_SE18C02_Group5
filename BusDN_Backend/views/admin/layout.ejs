@@ -115,7 +115,7 @@
                     </a>
                 </li>
                 <li>
-                    <a href="#" class="<%= path === 'reports' ? 'active' : '' %>">
+                    <a href="/admin/reports" class="<%= path === 'reports' ? 'active' : '' %>">
                         <i class="fas fa-chart-line me-2"></i> Báo cáo doanh thu
                     </a>
                 </li>
@@ -174,22 +174,22 @@
                 const warning = params.get('warning');
 
                 if (success) {
-                    Swal.fire({ icon: 'success', title: 'Success', text: success, confirmButtonText: 'OK' });
+                    Swal.fire({ icon: 'success', title: 'Thành công', text: success, confirmButtonText: 'OK' });
                 } else if (error) {
-                    Swal.fire({ icon: 'error', title: 'Error', text: error, confirmButtonText: 'OK' });
+                    Swal.fire({ icon: 'error', title: 'Lỗi', text: error, confirmButtonText: 'OK' });
                 } else if (warning) {
-                    Swal.fire({ icon: 'warning', title: 'Notice', text: warning, confirmButtonText: 'OK' });
+                    Swal.fire({ icon: 'warning', title: 'Thông báo', text: warning, confirmButtonText: 'OK' });
                 }
             }
 
             document.querySelectorAll('.js-confirm-form').forEach((form) => {
                 form.addEventListener('submit', (event) => {
                     event.preventDefault();
-                    const title = form.dataset.confirmTitle || 'Xac nhan thao tac?';
+                    const title = form.dataset.confirmTitle || 'Xác nhận thao tác?';
                     const text = form.dataset.confirmText || '';
                     const icon = form.dataset.confirmIcon || 'warning';
-                    const confirmButtonText = form.dataset.confirmButton || 'Xac nhan';
-                    const cancelButtonText = form.dataset.cancelButton || 'Huy';
+                    const confirmButtonText = form.dataset.confirmButton || 'Xác nhận';
+                    const cancelButtonText = form.dataset.cancelButton || 'Hủy';
 
                     if (typeof Swal === 'undefined') {
                         form.submit();

@@ -1,4 +1,4 @@
-const { Stop } = require('../models/models');
+const { Stop, Route, Schedule } = require('../models/models');
 const { renderAdmin } = require('../middleware/renderAdmin');
 // ===============================
 // Helpers
@@ -30,6 +30,53 @@ function parseCoordinate(value) {
   if (value === undefined || value === null || value === '') return Number.NaN;
   const normalized = String(value).trim().replace(',', '.');
   return Number(normalized);
+}
+
+async function getStopDeactivationBlockers(stopId) {
+  const protectedRouteStatuses = ['PENDING_REVIEW', 'APPROVED', 'SCHEDULED', 'ACTIVE', 'SUSPENDED'];
+  const routeFilter = {
+    status: { $in: protectedRouteStatuses },
+    $or: [
+      { startStopId: stopId },
+      { endStopId: stopId },
+      { 'stops.stopId': stopId },
+      { 'directions.outbound.stops.stopId': stopId },
+      { 'directions.inbound.stops.stopId': stopId }
+    ]
+  };
+
+  const relatedRoutes = await Route.find(routeFilter).select('_id routeNumber name status').lean();
+  const relatedRouteIds = relatedRoutes.map((route) => route._id);
+  const activeSchedulesCount = relatedRouteIds.length
+    ? await Schedule.countDocuments({
+        routeId: { $in: relatedRouteIds },
+        archived: { $ne: true },
+        status: { $in: ['SCHEDULED', 'IN_PROGRESS'] }
+      })
+    : 0;
+
+  return {
+    relatedRoutes,
+    activeSchedulesCount
+  };
+}
+
+async function validateStopDeactivation(stopId) {
+  const blockers = await getStopDeactivationBlockers(stopId);
+  if (!blockers.relatedRoutes.length && blockers.activeSchedulesCount === 0) {
+    return null;
+  }
+
+  if (blockers.activeSchedulesCount > 0) {
+    return `Không thể tạm ngưng trạm này vì còn ${blockers.activeSchedulesCount} lịch/chuyến đang dùng tuyến liên quan.`;
+  }
+
+  const routePreview = blockers.relatedRoutes
+    .slice(0, 3)
+    .map((route) => `${route.routeNumber} - ${route.name}`)
+    .join(', ');
+  const suffix = blockers.relatedRoutes.length > 3 ? '...' : '';
+  return `Không thể tạm ngưng trạm này vì vẫn đang được dùng trong ${blockers.relatedRoutes.length} tuyến: ${routePreview}${suffix}`;
 }
 
 async function validateStopPayload(payload, currentStopId = null) {
@@ -194,6 +241,14 @@ exports.updateStop = async (req, res) => {
       return res.redirect('/admin/stops');
     }
 
+    if (data.status === 'INACTIVE' && stop.status !== 'INACTIVE') {
+      const deactivationError = await validateStopDeactivation(stop._id);
+      if (deactivationError) {
+        setFlash(req, 'error', deactivationError);
+        return res.redirect('/admin/stops');
+      }
+    }
+
     stop.name = data.name;
     stop.address = data.address;
     stop.lat = data.lat;
@@ -214,6 +269,12 @@ exports.updateStop = async (req, res) => {
 exports.deactivateStop = async (req, res) => {
   try {
     const { id } = req.params;
+    const deactivationError = await validateStopDeactivation(id);
+    if (deactivationError) {
+      setFlash(req, 'error', deactivationError);
+      return res.redirect('/admin/stops');
+    }
+
     const stop = await Stop.findByIdAndUpdate(
       id,
       { $set: { status: 'INACTIVE' } },

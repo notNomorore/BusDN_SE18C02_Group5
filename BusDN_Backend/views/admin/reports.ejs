@@ -1,0 +1,177 @@
+<style>
+    .report-card {
+        border: none;
+        border-radius: 16px;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+    }
+
+    .report-kpi {
+        border: 1px solid #e9ecef;
+        border-radius: 14px;
+        padding: 16px 18px;
+        background: linear-gradient(180deg, #ffffff, #f8fafc);
+        height: 100%;
+    }
+
+    .report-kpi-label {
+        color: #6c757d;
+        font-size: 0.9rem;
+    }
+
+    .report-kpi-value {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #0f172a;
+    }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <div>
+        <h2 class="mb-1">Báo cáo doanh thu</h2>
+        <div class="text-muted">Tổng hợp doanh thu, lượt khách và số chuyến từ dữ liệu lịch chạy.</div>
+    </div>
+</div>
+
+<div class="card report-card mb-4">
+    <div class="card-body">
+        <form id="revenueReportForm" class="row g-3 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label">Từ ngày</label>
+                <input type="date" name="from" class="form-control">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Đến ngày</label>
+                <input type="date" name="to" class="form-control">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Nhóm theo</label>
+                <select name="group" class="form-select">
+                    <option value="day">Ngày</option>
+                    <option value="route">Tuyến</option>
+                </select>
+            </div>
+            <div class="col-md-3 d-flex gap-2">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="fas fa-filter me-1"></i> Xem báo cáo
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="report-kpi">
+            <div class="report-kpi-label">Tổng doanh thu</div>
+            <div class="report-kpi-value js-kpi-revenue">0 đ</div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="report-kpi">
+            <div class="report-kpi-label">Tổng lượt khách</div>
+            <div class="report-kpi-value js-kpi-passengers">0</div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="report-kpi">
+            <div class="report-kpi-label">Tổng số chuyến</div>
+            <div class="report-kpi-value js-kpi-trips">0</div>
+        </div>
+    </div>
+</div>
+
+<div class="card report-card">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <h5 class="mb-0">Chi tiết</h5>
+            <div class="small text-muted js-report-caption">Chưa có dữ liệu.</div>
+        </div>
+        <div class="table-responsive">
+            <table class="table align-middle table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Nhóm</th>
+                        <th>Doanh thu</th>
+                        <th>Lượt khách</th>
+                        <th>Số chuyến</th>
+                    </tr>
+                </thead>
+                <tbody class="js-report-rows">
+                    <tr>
+                        <td colspan="4" class="text-center text-muted py-4">Chưa tải dữ liệu báo cáo.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        const form = document.getElementById('revenueReportForm');
+        const rowsEl = document.querySelector('.js-report-rows');
+        const captionEl = document.querySelector('.js-report-caption');
+        const kpiRevenueEl = document.querySelector('.js-kpi-revenue');
+        const kpiPassengersEl = document.querySelector('.js-kpi-passengers');
+        const kpiTripsEl = document.querySelector('.js-kpi-trips');
+
+        function formatMoney(value) {
+            return `${Number(value || 0).toLocaleString('vi-VN')} đ`;
+        }
+
+        function setSummary(summary) {
+            kpiRevenueEl.textContent = formatMoney(summary?.totalRevenue || 0);
+            kpiPassengersEl.textContent = Number(summary?.totalPassengers || 0).toLocaleString('vi-VN');
+            kpiTripsEl.textContent = Number(summary?.totalTrips || 0).toLocaleString('vi-VN');
+        }
+
+        function renderRows(rows) {
+            if (!Array.isArray(rows) || !rows.length) {
+                rowsEl.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">Không có dữ liệu trong khoảng đã chọn.</td></tr>';
+                return;
+            }
+
+            rowsEl.innerHTML = rows.map((row) => `
+                <tr>
+                    <td>${row.label || '-'}</td>
+                    <td>${formatMoney(row.revenue)}</td>
+                    <td>${Number(row.passengers || 0).toLocaleString('vi-VN')}</td>
+                    <td>${Number(row.trips || 0).toLocaleString('vi-VN')}</td>
+                </tr>
+            `).join('');
+        }
+
+        async function loadReport() {
+            const params = new URLSearchParams(new FormData(form));
+            captionEl.textContent = 'Đang tải dữ liệu...';
+            rowsEl.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">Đang tải dữ liệu...</td></tr>';
+
+            try {
+                const response = await fetch(`/admin/reports/data?${params.toString()}`, {
+                    headers: { Accept: 'application/json' }
+                });
+                const payload = await response.json();
+                if (!response.ok || !payload.ok) {
+                    throw new Error(payload.message || 'Không thể tải báo cáo doanh thu.');
+                }
+
+                setSummary(payload.summary || {});
+                renderRows(payload.rows || []);
+                captionEl.textContent = payload.groupBy === 'route'
+                    ? 'Đang hiển thị theo tuyến.'
+                    : 'Đang hiển thị theo ngày.';
+            } catch (error) {
+                setSummary({});
+                rowsEl.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-4">${error.message || 'Không thể tải báo cáo doanh thu.'}</td></tr>`;
+                captionEl.textContent = 'Tải dữ liệu thất bại.';
+            }
+        }
+
+        form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            loadReport();
+        });
+
+        loadReport();
+    })();
+</script>

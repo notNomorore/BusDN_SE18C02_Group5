@@ -43,24 +43,24 @@
 <div class="users-shell">
     <section class="users-hero">
         <div>
-            <h1 class="h4 mb-1"><i class="fas fa-users-cog me-2 text-primary"></i>User Management</h1>
-            <div class="text-muted small">Search by Name/Email/Phone and filter by Role</div>
+            <h1 class="h4 mb-1"><i class="fas fa-users-cog me-2 text-primary"></i>Quản lý nhân sự</h1>
+            <div class="text-muted small">Tìm theo tên, email, số điện thoại và lọc theo vai trò</div>
         </div>
         <a href="/admin/staff/create" class="btn btn-primary btn-sm">
-            <i class="fas fa-user-plus me-1"></i> Create Account
+            <i class="fas fa-user-plus me-1"></i> Tạo tài khoản
         </a>
     </section>
 
     <section class="users-card">
         <form method="POST" action="/admin/staff/import" enctype="multipart/form-data" class="users-grid align-items-end">
             <div>
-                <label class="form-label fw-semibold mb-1">Import Bulk (Excel/CSV)</label>
+                <label class="form-label fw-semibold mb-1">Nhập hàng loạt (Excel/CSV)</label>
                 <input type="file" name="staffFile" class="form-control" accept=".csv,.xlsx,.xls" required>
-                <small class="text-muted">Columns: `fullName, email, phone, role`</small>
+                <small class="text-muted">Các cột: `fullName, email, phone, role`</small>
             </div>
             <div>
                 <button type="submit" class="btn btn-outline-primary w-100">
-                    <i class="fas fa-upload me-1"></i> Import Staff
+                    <i class="fas fa-upload me-1"></i> Nhập danh sách
                 </button>
             </div>
         </form>
@@ -69,20 +69,20 @@
     <section class="users-card">
         <form method="GET" action="/admin/staff" class="users-grid align-items-end">
             <div>
-                <label class="form-label fw-semibold mb-1">Search</label>
-                <input type="text" name="search" class="form-control" placeholder="Name, email or phone..." value="<%= search || '' %>">
+                <label class="form-label fw-semibold mb-1">Tìm kiếm</label>
+                <input type="text" name="search" class="form-control" placeholder="Tên, email hoặc số điện thoại..." value="<%= search || '' %>">
             </div>
             <div>
-                <label class="form-label fw-semibold mb-1">Role</label>
+                <label class="form-label fw-semibold mb-1">Vai trò</label>
                 <select name="role" class="form-select">
-                    <option value="ALL" <%= role === 'ALL' ? 'selected' : '' %>>All</option>
-                    <option value="DRIVER" <%= role === 'DRIVER' ? 'selected' : '' %>>Driver</option>
-                    <option value="CONDUCTOR" <%= role === 'CONDUCTOR' ? 'selected' : '' %>>Conductor</option>
+                    <option value="ALL" <%= role === 'ALL' ? 'selected' : '' %>>Tất cả</option>
+                    <option value="DRIVER" <%= role === 'DRIVER' ? 'selected' : '' %>>Tài xế</option>
+                    <option value="CONDUCTOR" <%= role === 'CONDUCTOR' ? 'selected' : '' %>>Phụ xe</option>
                 </select>
             </div>
             <div>
                 <button type="submit" class="btn btn-primary w-100">
-                    <i class="fas fa-search me-1"></i> Apply
+                    <i class="fas fa-search me-1"></i> Áp dụng
                 </button>
             </div>
         </form>
@@ -90,22 +90,22 @@
 
     <section class="users-card p-0 overflow-hidden">
         <div class="px-3 py-2 border-bottom bg-light">
-            <strong>Users (<%= users && users.length || 0 %>)</strong>
+            <strong>Nhân sự (<%= users && users.length || 0 %>)</strong>
         </div>
         <% if (!users || users.length === 0) { %>
-            <div class="text-center py-5 text-muted">No staff records.</div>
+            <div class="text-center py-5 text-muted">Chưa có nhân sự nào.</div>
         <% } else { %>
             <div class="table-responsive">
                 <table class="table table-hover align-middle mb-0">
                     <thead class="table-light">
                         <tr>
                             <th class="text-center">#</th>
-                            <th>User</th>
-                            <th>Login</th>
-                            <th>Role</th>
-                            <th>Status</th>
-                            <th>Created</th>
-                            <th class="text-center">Action</th>
+                            <th>Người dùng</th>
+                            <th>Đăng nhập</th>
+                            <th>Vai trò</th>
+                            <th>Trạng thái</th>
+                            <th>Ngày tạo</th>
+                            <th class="text-center">Hành động</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -117,31 +117,31 @@
                                         <img src="<%= user.avatar || '/images/default-avatar.png' %>" alt="<%= user.fullName %>" class="users-avatar">
                                         <div>
                                             <div class="fw-semibold"><%= user.fullName %></div>
-                                            <small class="text-muted"><i class="fas fa-phone me-1"></i><%= user.phone || 'N/A' %></small>
+                                            <small class="text-muted"><i class="fas fa-phone me-1"></i><%= user.phone || 'Không có dữ liệu' %></small>
                                         </div>
                                     </div>
                                 </td>
-                                <td><small class="text-muted"><%= user.email || user.phone || 'N/A' %></small></td>
+                                <td><small class="text-muted"><%= user.email || user.phone || 'Không có dữ liệu' %></small></td>
                                 <td>
                                     <span class="badge <%= user.role === 'DRIVER' ? 'bg-primary' : 'bg-info' %>">
-                                        <%= user.role %>
+                                        <%= user.role === 'DRIVER' ? 'Tài xế' : user.role === 'CONDUCTOR' ? 'Phụ xe' : user.role %>
                                     </span>
                                 </td>
                                 <td>
                                     <% const locked = user.status === 'LOCKED' || user.isLocked; %>
                                     <span class="badge <%= locked ? 'bg-danger' : 'bg-success' %>">
-                                        <%= locked ? 'LOCKED' : 'ACTIVE' %>
+                                        <%= locked ? 'Đã khóa' : 'Hoạt động' %>
                                     </span>
                                 </td>
                                 <td class="small text-muted"><%= new Date(user.createdAt).toLocaleDateString('vi-VN') %></td>
                                 <td class="text-center">
                                     <form method="POST" action="/admin/staff/<%= user._id %>/toggle-lock" class="d-inline js-staff-lock-form"
-                                        data-confirm-title="<%= (user.status === 'LOCKED' || user.isLocked) ? 'Mo khoa tai khoan?' : 'Khoa tai khoan?' %>"
+                                        data-confirm-title="<%= (user.status === 'LOCKED' || user.isLocked) ? 'Mở khóa tài khoản?' : 'Khóa tài khoản?' %>"
                                         data-confirm-text="<%= user.email || user.phone %>"
-                                        data-confirm-button="<%= (user.status === 'LOCKED' || user.isLocked) ? 'Mo khoa' : 'Khoa' %>">
+                                        data-confirm-button="<%= (user.status === 'LOCKED' || user.isLocked) ? 'Mở khóa' : 'Khóa' %>">
                                         <button type="submit" class="btn btn-sm <%= (user.status === 'LOCKED' || user.isLocked) ? 'btn-success' : 'btn-outline-danger' %>">
                                             <i class="fas fa-<%= (user.status === 'LOCKED' || user.isLocked) ? 'lock-open' : 'lock' %> me-1"></i>
-                                            <%= (user.status === 'LOCKED' || user.isLocked) ? 'Unlock' : 'Lock' %>
+                                            <%= (user.status === 'LOCKED' || user.isLocked) ? 'Mở khóa' : 'Khóa' %>
                                         </button>
                                     </form>
                                 </td>
@@ -172,12 +172,12 @@
                 event.preventDefault();
                 if (typeof Swal === 'undefined') return form.submit();
                 Swal.fire({
-                    title: form.dataset.confirmTitle || 'Confirm?',
+                    title: form.dataset.confirmTitle || 'Xác nhận?',
                     text: form.dataset.confirmText || '',
                     icon: 'warning',
                     showCancelButton: true,
-                    confirmButtonText: form.dataset.confirmButton || 'Confirm',
-                    cancelButtonText: 'Cancel',
+                    confirmButtonText: form.dataset.confirmButton || 'Xác nhận',
+                    cancelButtonText: 'Hủy',
                     reverseButtons: true
                 }).then((result) => {
                     if (result.isConfirmed) form.submit();
@@ -193,9 +193,9 @@
 
         Swal.fire({
             icon: 'success',
-            title: 'Tai khoan can gui thu cong',
+            title: 'Tài khoản cần gửi thủ công',
             html: `<div class="text-start"><p>${onboardingInfo.summary || ''}</p><pre class="bg-light p-2 border rounded small">${lines}</pre></div>`,
-            confirmButtonText: 'Da xem'
+            confirmButtonText: 'Đã xem'
         });
     })();
 </script>

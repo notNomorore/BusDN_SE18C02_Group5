@@ -1,7 +1,7 @@
 <div class="d-flex justify-content-between align-items-center pb-2 mb-3 border-bottom">
-    <h1 class="h2"><i class="fas fa-user-plus me-2 text-primary"></i> Tao Tai Khoan Nhan Vien</h1>
+    <h1 class="h2"><i class="fas fa-user-plus me-2 text-primary"></i> Tạo Tài Khoản Nhân Viên</h1>
     <a href="/admin/staff" class="btn btn-outline-secondary btn-sm">
-        <i class="fas fa-arrow-left me-1"></i> Quay lai danh sach
+        <i class="fas fa-arrow-left me-1"></i> Quay lại danh sách
     </a>
 </div>
 
@@ -9,7 +9,7 @@
     <div class="col-md-7">
         <div class="card shadow-sm">
             <div class="card-header bg-primary text-white fw-bold">
-                <i class="fas fa-id-card me-2"></i> Thong tin tai khoan moi
+                <i class="fas fa-id-card me-2"></i> Thông tin tài khoản mới
             </div>
             <div class="card-body p-4">
                 <% if (error) { %>
@@ -22,38 +22,38 @@
 
                 <form method="POST" action="/admin/staff/create">
                     <div class="mb-3">
-                        <label class="form-label fw-semibold">Ho va ten <span class="text-danger">*</span></label>
-                        <input type="text" name="fullName" class="form-control" placeholder="VD: Nguyen Van A" required>
+                        <label class="form-label fw-semibold">Họ và tên <span class="text-danger">*</span></label>
+                        <input type="text" name="fullName" class="form-control" placeholder="VD: Nguyễn Văn A" required>
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label fw-semibold">Email (optional)</label>
+                        <label class="form-label fw-semibold">Email (không bắt buộc)</label>
                         <input type="text" name="email" id="staffEmail" class="form-control" placeholder="email@example.com" list="emailSuggestions" autocomplete="off">
                         <datalist id="emailSuggestions"></datalist>
-                        <div class="form-text">Neu khong co email, co the tao bang so dien thoai.</div>
+                        <div class="form-text">Nếu không có email, có thể tạo bằng số điện thoại.</div>
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label fw-semibold">So dien thoai (optional)</label>
+                        <label class="form-label fw-semibold">Số điện thoại (không bắt buộc)</label>
                         <input type="tel" name="phone" class="form-control" placeholder="0xxx xxx xxx">
-                        <div class="form-text">Can it nhat email hoac so dien thoai.</div>
+                        <div class="form-text">Cần ít nhất email hoặc số điện thoại.</div>
                     </div>
 
                     <div class="mb-4">
-                        <label class="form-label fw-semibold">Vai tro <span class="text-danger">*</span></label>
+                        <label class="form-label fw-semibold">Vai trò <span class="text-danger">*</span></label>
                         <select name="role" class="form-select" required>
-                            <option value="DRIVER">Tai xe</option>
-                            <option value="CONDUCTOR">Phu xe</option>
+                            <option value="DRIVER">Tài xế</option>
+                            <option value="CONDUCTOR">Phụ xe</option>
                         </select>
                     </div>
 
                     <div class="alert alert-info small">
-                        Mat khau tam thoi se duoc sinh tu dong (8-10 ky tu bao gom chu hoa, chu thuong, so va ky tu dac biet).
+                        Mật khẩu tạm thời sẽ được sinh tự động (8-10 ký tự bao gồm chữ hoa, chữ thường, số và ký tự đặc biệt).
                     </div>
 
                     <div class="d-grid">
                         <button type="submit" class="btn btn-primary btn-lg">
-                            <i class="fas fa-user-plus me-2"></i> Tao tai khoan
+                            <i class="fas fa-user-plus me-2"></i> Tạo tài khoản
                         </button>
                     </div>
                 </form>

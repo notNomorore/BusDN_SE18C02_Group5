@@ -1,8 +1,16 @@
+<%
+const builderTitle = typeof title === 'string' && title ? title : 'Hành trình tuyến xe';
+const builderHelpText = typeof helpText === 'string' && helpText
+    ? helpText
+    : 'Chọn trạm theo đúng thứ tự xe sẽ đi qua. Hệ thống sẽ tự xác định điểm đầu, điểm cuối.';
+const hiddenFieldName = typeof hiddenName === 'string' && hiddenName ? hiddenName : 'stopSequence';
+%>
+
 <div class="route-builder js-route-builder" data-builder-id="<%= builderId %>">
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
         <div>
-            <h6 class="mb-1">Hành trình tuyến xe</h6>
-            <div class="small text-muted">Chọn trạm theo đúng thứ tự xe sẽ đi qua. Hệ thống sẽ tự xác định điểm đầu, điểm cuối và tạo chiều về ngược lại.</div>
+            <h6 class="mb-1"><%= builderTitle %></h6>
+            <div class="small text-muted"><%= builderHelpText %></div>
         </div>
         <span class="badge text-bg-light border">Số trạm: <span class="js-stop-count">0</span></span>
     </div>
@@ -42,7 +50,7 @@
 
     <input
         type="hidden"
-        name="stopSequence"
+        name="<%= hiddenFieldName %>"
         class="js-stop-sequence"
         value='<%- JSON.stringify((sequence || []).map((stop) => String(stop.id || stop._id || stop.stopId || stop))) %>'>
 </div>

@@ -322,11 +322,11 @@
         <div>
             <span class="header-badge <%= profile.status %>">
                 <% if (profile.status === 'pending') { %>
-                    <i class="fas fa-clock me-2"></i> Pending Review
+                    <i class="fas fa-clock me-2"></i> Chờ duyệt
                 <% } else if (profile.status === 'approved') { %>
-                    <i class="fas fa-check-circle me-2"></i> Approved
+                    <i class="fas fa-check-circle me-2"></i> Đã duyệt
                 <% } else { %>
-                    <i class="fas fa-times-circle me-2"></i> Rejected
+                    <i class="fas fa-times-circle me-2"></i> Từ chối
                 <% } %>
             </span>
         </div>
@@ -334,35 +334,35 @@
 
     <!-- Profile Information -->
     <div class="detail-card">
-        <div class="card-title"><i class="fas fa-id-card me-2"></i> Profile Information</div>
+        <div class="card-title"><i class="fas fa-id-card me-2"></i> Thông tin hồ sơ</div>
         <div class="info-grid">
             <div class="info-item">
-                <div class="info-label">Category</div>
+                <div class="info-label">Nhóm ưu tiên</div>
                 <div class="info-value"><%= profile.category %></div>
             </div>
             <div class="info-item">
-                <div class="info-label">ID Number</div>
+                <div class="info-label">Số giấy tờ</div>
                 <div class="info-value"><%= profile.idNumber %></div>
             </div>
             <div class="info-item">
-                <div class="info-label">Status</div>
+                <div class="info-label">Trạng thái</div>
                 <div class="info-value" style="color: <%= profile.status === 'approved' ? '#28a745' : profile.status === 'pending' ? '#ffc107' : '#dc3545' %>;">
-                    <%= profile.status.toUpperCase() %>
+                    <%= profile.status === 'approved' ? 'ĐÃ DUYỆT' : profile.status === 'rejected' ? 'TỪ CHỐI' : 'CHỜ DUYỆT' %>
                 </div>
             </div>
             <div class="info-item">
-                <div class="info-label">Submitted Date</div>
-                <div class="info-value"><%= new Date(profile.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) %></div>
+                <div class="info-label">Ngày gửi</div>
+                <div class="info-value"><%= new Date(profile.createdAt).toLocaleDateString('vi-VN', { year: 'numeric', month: 'long', day: 'numeric' }) %></div>
             </div>
             <% if (profile.expiryDate) { %>
                 <div class="info-item">
-                    <div class="info-label">Expiry Date</div>
-                    <div class="info-value"><%= new Date(profile.expiryDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) %></div>
+                    <div class="info-label">Ngày hết hạn</div>
+                    <div class="info-value"><%= new Date(profile.expiryDate).toLocaleDateString('vi-VN', { year: 'numeric', month: 'long', day: 'numeric' }) %></div>
                 </div>
             <% } %>
             <% if (profile.rejectionReason) { %>
                 <div class="info-item">
-                    <div class="info-label">Rejection Reason</div>
+                    <div class="info-label">Lý do từ chối</div>
                     <div class="info-value" style="color: #dc3545;"><%= profile.rejectionReason %></div>
                 </div>
             <% } %>
@@ -371,7 +371,7 @@
 
     <!-- Documents -->
     <div class="detail-card">
-        <div class="card-title"><i class="fas fa-file-image me-2"></i> Uploaded Documents</div>
+        <div class="card-title"><i class="fas fa-file-image me-2"></i> Tài liệu đã tải lên</div>
         <div class="document-grid">
             <!-- ID Card Front -->
             <div class="document-card">
@@ -379,13 +379,13 @@
                     <img src="<%= profile.idCardImageFront %>" alt="ID Front">
                 </div>
                 <div class="document-info">
-                    <div class="document-name">ID Card - Front</div>
+                    <div class="document-name">CCCD/CMND - Mặt trước</div>
                     <div class="action-buttons">
                         <button class="action-btn view" onclick="openModal('<%= profile.idCardImageFront %>')">
-                            <i class="fas fa-eye"></i> View
+                            <i class="fas fa-eye"></i> Xem
                         </button>
                         <a href="<%= profile.idCardImageFront %>" download class="action-btn download">
-                            <i class="fas fa-download"></i> Download
+                            <i class="fas fa-download"></i> Tải xuống
                         </a>
                     </div>
                 </div>
@@ -397,13 +397,13 @@
                     <img src="<%= profile.idCardImageBack %>" alt="ID Back">
                 </div>
                 <div class="document-info">
-                    <div class="document-name">ID Card - Back</div>
+                    <div class="document-name">CCCD/CMND - Mặt sau</div>
                     <div class="action-buttons">
                         <button class="action-btn view" onclick="openModal('<%= profile.idCardImageBack %>')">
-                            <i class="fas fa-eye"></i> View
+                            <i class="fas fa-eye"></i> Xem
                         </button>
                         <a href="<%= profile.idCardImageBack %>" download class="action-btn download">
-                            <i class="fas fa-download"></i> Download
+                            <i class="fas fa-download"></i> Tải xuống
                         </a>
                     </div>
                 </div>
@@ -415,13 +415,13 @@
                     <img src="<%= profile.proofImage %>" alt="Priority Proof">
                 </div>
                 <div class="document-info">
-                    <div class="document-name">Priority Proof</div>
+                    <div class="document-name">Giấy tờ chứng minh ưu tiên</div>
                     <div class="action-buttons">
                         <button class="action-btn view" onclick="openModal('<%= profile.proofImage %>')">
-                            <i class="fas fa-eye"></i> View
+                            <i class="fas fa-eye"></i> Xem
                         </button>
                         <a href="<%= profile.proofImage %>" download class="action-btn download">
-                            <i class="fas fa-download"></i> Download
+                            <i class="fas fa-download"></i> Tải xuống
                         </a>
                     </div>
                 </div>
@@ -432,16 +432,16 @@
     <!-- Actions -->
     <% if (profile.status === 'pending') { %>
         <div class="detail-card">
-            <div class="card-title"><i class="fas fa-tasks me-2"></i> Review Actions</div>
+            <div class="card-title"><i class="fas fa-tasks me-2"></i> Thao tác duyệt</div>
             <div class="action-section">
                 <button class="btn btn-success" onclick="approveProfile()">
-                    <i class="fas fa-check-circle"></i> Approve Profile
+                    <i class="fas fa-check-circle"></i> Duyệt hồ sơ
                 </button>
                 <button class="btn btn-danger" onclick="rejectProfile()">
-                    <i class="fas fa-times-circle"></i> Reject Profile
+                    <i class="fas fa-times-circle"></i> Từ chối hồ sơ
                 </button>
                 <a href="/admin/priority-profiles" class="btn btn-secondary">
-                    <i class="fas fa-arrow-left"></i> Back to List
+                    <i class="fas fa-arrow-left"></i> Quay lại danh sách
                 </a>
             </div>
         </div>
@@ -449,7 +449,7 @@
         <div class="detail-card">
             <div class="action-section">
                 <a href="/admin/priority-profiles" class="btn btn-secondary">
-                    <i class="fas fa-arrow-left"></i> Back to List
+                    <i class="fas fa-arrow-left"></i> Quay lại danh sách
                 </a>
             </div>
         </div>
@@ -467,15 +467,15 @@
 <!-- Approve Modal -->
 <div id="approveModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
     <div style="background: white; padding: 30px; border-radius: 8px; max-width: 400px;">
-        <h3 style="margin-top: 0; color: #003366;">Approve Priority Profile</h3>
-        <p>Set the expiry date for this profile (minimum 2 years from approval date):</p>
+        <h3 style="margin-top: 0; color: #003366;">Duyệt hồ sơ ưu tiên</h3>
+        <p>Thiết lập ngày hết hạn cho hồ sơ này, tối thiểu 2 năm kể từ ngày duyệt:</p>
         <div style="margin: 20px 0;">
-            <label style="display: block; margin-bottom: 8px; font-weight: 600;">Expiry Date</label>
+            <label style="display: block; margin-bottom: 8px; font-weight: 600;">Ngày hết hạn</label>
             <input type="date" id="expiryDate" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
         </div>
         <div style="display: flex; gap: 10px; justify-content: flex-end;">
-            <button onclick="closeApproveModal()" style="padding: 8px 16px; border: none; background: #6c757d; color: white; border-radius: 4px; cursor: pointer;">Cancel</button>
-            <button onclick="submitApprove()" style="padding: 8px 16px; border: none; background: #28a745; color: white; border-radius: 4px; cursor: pointer;">Approve</button>
+            <button onclick="closeApproveModal()" style="padding: 8px 16px; border: none; background: #6c757d; color: white; border-radius: 4px; cursor: pointer;">Hủy</button>
+            <button onclick="submitApprove()" style="padding: 8px 16px; border: none; background: #28a745; color: white; border-radius: 4px; cursor: pointer;">Duyệt</button>
         </div>
     </div>
 </div>
@@ -483,14 +483,14 @@
 <!-- Reject Modal -->
 <div id="rejectModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
     <div style="background: white; padding: 30px; border-radius: 8px; max-width: 400px;">
-        <h3 style="margin-top: 0; color: #003366;">Reject Priority Profile</h3>
-        <p>Please provide a reason for rejecting this profile:</p>
+        <h3 style="margin-top: 0; color: #003366;">Từ chối hồ sơ ưu tiên</h3>
+        <p>Vui lòng nhập lý do từ chối hồ sơ này:</p>
         <div style="margin: 20px 0;">
-            <textarea id="rejectionReason" placeholder="Reason for rejection..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; min-height: 120px; font-family: inherit; font-size: 14px;"></textarea>
+            <textarea id="rejectionReason" placeholder="Nhập lý do từ chối..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; min-height: 120px; font-family: inherit; font-size: 14px;"></textarea>
         </div>
         <div style="display: flex; gap: 10px; justify-content: flex-end;">
-            <button onclick="closeRejectModal()" style="padding: 8px 16px; border: none; background: #6c757d; color: white; border-radius: 4px; cursor: pointer;">Cancel</button>
-            <button onclick="submitReject()" style="padding: 8px 16px; border: none; background: #dc3545; color: white; border-radius: 4px; cursor: pointer;">Reject</button>
+            <button onclick="closeRejectModal()" style="padding: 8px 16px; border: none; background: #6c757d; color: white; border-radius: 4px; cursor: pointer;">Hủy</button>
+            <button onclick="submitReject()" style="padding: 8px 16px; border: none; background: #dc3545; color: white; border-radius: 4px; cursor: pointer;">Từ chối</button>
         </div>
     </div>
 </div>
@@ -534,11 +534,11 @@
     function submitApprove() {
         const expiryDate = document.getElementById('expiryDate').value;
         if (!expiryDate) {
-            Swal.fire({ icon: 'warning', title: 'Missing data', text: 'Please select an expiry date' });
+            Swal.fire({ icon: 'warning', title: 'Thiếu dữ liệu', text: 'Vui lòng chọn ngày hết hạn' });
             return;
         }
         if (expiryDate < todayDateString) {
-            alert('Expiry date cannot be in the past');
+            alert('Ngày hết hạn không được ở trong quá khứ');
             return;
         }
 
@@ -550,13 +550,13 @@
         .then(res => res.json())
         .then(data => {
             if (data.success) {
-                Swal.fire({ icon: 'success', title: 'Success', text: 'Profile approved successfully' })
+                Swal.fire({ icon: 'success', title: 'Thành công', text: 'Đã duyệt hồ sơ thành công' })
                     .then(() => { location.href = '/admin/priority-profiles'; });
             } else {
-                Swal.fire({ icon: 'error', title: 'Error', text: data.error || 'Approval failed' });
+                Swal.fire({ icon: 'error', title: 'Lỗi', text: data.error || 'Duyệt hồ sơ thất bại' });
             }
         })
-        .catch(err => Swal.fire({ icon: 'error', title: 'Error', text: String(err) }));
+        .catch(err => Swal.fire({ icon: 'error', title: 'Lỗi', text: String(err) }));
     }
 
     // Reject Modal
@@ -571,7 +571,7 @@
     function submitReject() {
         const rejectionReason = document.getElementById('rejectionReason').value;
         if (!rejectionReason) {
-            Swal.fire({ icon: 'warning', title: 'Missing data', text: 'Please enter a rejection reason' });
+            Swal.fire({ icon: 'warning', title: 'Thiếu dữ liệu', text: 'Vui lòng nhập lý do từ chối' });
             return;
         }
 
@@ -583,12 +583,12 @@
         .then(res => res.json())
         .then(data => {
             if (data.success) {
-                Swal.fire({ icon: 'success', title: 'Success', text: 'Profile rejected successfully' })
+                Swal.fire({ icon: 'success', title: 'Thành công', text: 'Đã từ chối hồ sơ thành công' })
                     .then(() => { location.href = '/admin/priority-profiles'; });
             } else {
-                Swal.fire({ icon: 'error', title: 'Error', text: data.error || 'Reject failed' });
+                Swal.fire({ icon: 'error', title: 'Lỗi', text: data.error || 'Từ chối hồ sơ thất bại' });
             }
         })
-        .catch(err => Swal.fire({ icon: 'error', title: 'Error', text: String(err) }));
+        .catch(err => Swal.fire({ icon: 'error', title: 'Lỗi', text: String(err) }));
     }
 </script>

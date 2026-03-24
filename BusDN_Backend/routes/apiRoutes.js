@@ -42,6 +42,96 @@ const PAYMENT_METHOD = {
     MOMO: 'MOMO'
 };
 
+async function getRouteDeactivationBlockers(routeId) {
+    const activeSchedules = await Schedule.find({
+        routeId,
+        archived: { $ne: true },
+        status: { $in: ['SCHEDULED', 'IN_PROGRESS'] }
+    })
+        .select('_id status trackingActive passengerCount')
+        .lean();
+
+    const scheduleIds = activeSchedules.map((schedule) => schedule._id);
+    const runningSchedulesCount = activeSchedules.filter(
+        (schedule) =>
+            schedule.status === 'IN_PROGRESS' ||
+            schedule.trackingActive === true ||
+            Number(schedule.passengerCount || 0) > 0
+    ).length;
+
+    const activeTripTicketCount = scheduleIds.length
+        ? await TripTicket.countDocuments({
+            scheduleId: { $in: scheduleIds },
+            status: { $in: ['BOOKED', 'USED'] }
+        })
+        : 0;
+
+    return {
+        activeSchedulesCount: activeSchedules.length,
+        runningSchedulesCount,
+        activeTripTicketCount
+    };
+}
+
+async function validateRouteDeactivation(routeId) {
+    const blockers = await getRouteDeactivationBlockers(routeId);
+
+    if (blockers.runningSchedulesCount > 0) {
+        return `Không thể tạm ngưng tuyến vì đang có ${blockers.runningSchedulesCount} chuyến đang chạy hoặc đang chở khách.`;
+    }
+
+    if (blockers.activeTripTicketCount > 0) {
+        return `Không thể tạm ngưng tuyến vì còn ${blockers.activeTripTicketCount} vé lượt đã đặt/đang sử dụng trên các chuyến chưa hoàn tất.`;
+    }
+
+    if (blockers.activeSchedulesCount > 0) {
+        return `Không thể tạm ngưng tuyến vì còn ${blockers.activeSchedulesCount} chuyến đã được lên lịch.`;
+    }
+
+    return null;
+}
+
+async function getStopDeactivationBlockers(stopId) {
+    const protectedRouteStatuses = ['PENDING_REVIEW', 'APPROVED', 'SCHEDULED', 'ACTIVE', 'SUSPENDED'];
+    const relatedRoutes = await Route.find({
+        status: { $in: protectedRouteStatuses },
+        $or: [
+            { startStopId: stopId },
+            { endStopId: stopId },
+            { 'stops.stopId': stopId },
+            { 'directions.outbound.stops.stopId': stopId },
+            { 'directions.inbound.stops.stopId': stopId }
+        ]
+    }).select('_id routeNumber name').lean();
+
+    const relatedRouteIds = relatedRoutes.map((route) => route._id);
+    const activeSchedulesCount = relatedRouteIds.length
+        ? await Schedule.countDocuments({
+            routeId: { $in: relatedRouteIds },
+            archived: { $ne: true },
+            status: { $in: ['SCHEDULED', 'IN_PROGRESS'] }
+        })
+        : 0;
+
+    return { relatedRoutes, activeSchedulesCount };
+}
+
+async function validateStopDeactivation(stopId) {
+    const blockers = await getStopDeactivationBlockers(stopId);
+    if (!blockers.relatedRoutes.length && blockers.activeSchedulesCount === 0) return null;
+
+    if (blockers.activeSchedulesCount > 0) {
+        return `Không thể tạm ngưng trạm này vì còn ${blockers.activeSchedulesCount} lịch/chuyến đang dùng tuyến liên quan.`;
+    }
+
+    const routePreview = blockers.relatedRoutes
+        .slice(0, 3)
+        .map((route) => `${route.routeNumber} - ${route.name}`)
+        .join(', ');
+    const suffix = blockers.relatedRoutes.length > 3 ? '...' : '';
+    return `Không thể tạm ngưng trạm này vì vẫn đang được dùng trong ${blockers.relatedRoutes.length} tuyến: ${routePreview}${suffix}`;
+}
+
 const ensureAdminApi = async (req, res) => {
     const adminUser = await User.findById(req.user.userId).select('role');
     if (!adminUser || adminUser.role !== 'ADMIN') {
@@ -2172,7 +2262,14 @@ router.put('/admin/routes/:id', authMiddleware, async (req, res) => {
         route.name = name.trim();
         route.distance = Number(distance);
         route.description = description?.trim();
-        route.status = ['ACTIVE', 'INACTIVE'].includes(status) ? status : 'ACTIVE';
+        const nextStatus = ['ACTIVE', 'INACTIVE'].includes(status) ? status : 'ACTIVE';
+        if (nextStatus === 'INACTIVE' && route.status !== 'INACTIVE') {
+            const deactivationError = await validateRouteDeactivation(route._id);
+            if (deactivationError) {
+                return res.status(409).json({ ok: false, message: deactivationError, code: 'ROUTE_DEACTIVATION_BLOCKED' });
+            }
+        }
+        route.status = nextStatus;
         route.monthlyPassPrice = monthlyPassPrice != null ? Number(monthlyPassPrice) : 200000;
 
         if (frequencyMinutes != null) route.frequencyMinutes = Math.max(1, Number(frequencyMinutes) || 15);
@@ -2206,7 +2303,14 @@ router.post('/admin/routes/:id/toggle-status', authMiddleware, async (req, res) 
         const route = await Route.findById(req.params.id);
         if (!route) return res.status(404).json({ ok: false, message: 'KhÃ´ng tÃ¬m tháº¥y tuyáº¿n' });
 
-        route.status = route.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+        const nextStatus = route.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+        if (nextStatus === 'INACTIVE') {
+            const deactivationError = await validateRouteDeactivation(route._id);
+            if (deactivationError) {
+                return res.status(409).json({ ok: false, message: deactivationError, code: 'ROUTE_DEACTIVATION_BLOCKED' });
+            }
+        }
+        route.status = nextStatus;
         await route.save();
 
         res.json({ ok: true, message: `ÄÃ£ ${route.status === 'ACTIVE' ? 'kÃ­ch hoáº¡t' : 'táº¡m ngÆ°ng'} tuyáº¿n`, status: route.status });
@@ -2319,7 +2423,15 @@ router.put('/admin/stops/:id', authMiddleware, async (req, res) => {
         if (lat != null) stop.lat = Number(lat);
         if (lng != null) stop.lng = Number(lng);
         if (isTerminal != null) stop.isTerminal = !!isTerminal;
-        if (status && ['ACTIVE', 'INACTIVE'].includes(status)) stop.status = status;
+        if (status && ['ACTIVE', 'INACTIVE'].includes(status)) {
+            if (status === 'INACTIVE' && stop.status !== 'INACTIVE') {
+                const deactivationError = await validateStopDeactivation(stop._id);
+                if (deactivationError) {
+                    return res.status(409).json({ ok: false, message: deactivationError, code: 'STOP_DEACTIVATION_BLOCKED' });
+                }
+            }
+            stop.status = status;
+        }
 
         await stop.save();
 
@@ -2467,7 +2579,14 @@ router.post('/admin/stops/:id/toggle-status', authMiddleware, async (req, res) =
         const stop = await Stop.findById(req.params.id);
         if (!stop) return res.status(404).json({ ok: false, message: 'KhÃ´ng tÃ¬m tháº¥y tráº¡m' });
 
-        stop.status = stop.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+        const nextStatus = stop.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+        if (nextStatus === 'INACTIVE') {
+            const deactivationError = await validateStopDeactivation(stop._id);
+            if (deactivationError) {
+                return res.status(409).json({ ok: false, message: deactivationError, code: 'STOP_DEACTIVATION_BLOCKED' });
+            }
+        }
+        stop.status = nextStatus;
         await stop.save();
 
         res.json({ ok: true, message: `ÄÃ£ ${stop.status === 'ACTIVE' ? 'kÃ­ch hoáº¡t' : 'táº¡m ngÆ°ng'} tráº¡m`, status: stop.status });
