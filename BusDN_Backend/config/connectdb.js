@@ -3,7 +3,7 @@ require('dotenv').config();
 
 const connectDB = async () => {
     try {
-        const dbURI = process.env.MONGODB_URI;
+        const dbURI = "mongodb+srv://DE181046:nhatminh@busdn.2y1qib0.mongodb.net/?appName=BusDN";
         
         if (!dbURI) {
             console.error("❌ Lỗi: MONGODB_URI không tồn tại trong file .env");

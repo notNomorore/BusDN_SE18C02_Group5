@@ -105,7 +105,7 @@ const optionText = (value) => ({
             <div class="row g-3">
                 <div class="col-12"><label class="form-label">Ngày hoạt động</label><div class="d-flex flex-wrap gap-3"><% dayOptions.forEach((day) => { %><div class="form-check"><input class="form-check-input" type="checkbox" name="operatingDays" id="opDay-<%= day.value %>" value="<%= day.value %>" <%= selectedDays.includes(day.value) ? 'checked' : '' %>><label class="form-check-label" for="opDay-<%= day.value %>"><%= day.label %></label></div><% }) %></div></div>
                 <div class="col-md-3"><label class="form-label">Giờ bắt đầu</label><input type="time" name="startTime" class="form-control" value="<%= form.startTime || '' %>"></div>
-                <div class="col-md-3"><label class="form-label">Giờ kết thúc</label><input type="time" name="endTime" class="form-control" value="<%= form.endTime || '' %>"></div>
+                <div class="col-md-3"><label class="form-label">Giờ kết thúc</label><input type="time" name="endTime" class="form-control" value="<%= form.endTime || '' %>" max="19:30"></div>
                 <div class="col-md-2"><label class="form-label">Tần suất chuyến</label><input type="number" name="tripInterval" min="1" step="1" class="form-control" value="<%= form.tripInterval ?? '' %>"></div>
                 <div class="col-md-2"><label class="form-label">Thời gian hành trình</label><input type="number" name="estimatedRouteDuration" min="1" step="1" class="form-control" value="<%= form.estimatedRouteDuration ?? '' %>"></div>
                 <div class="col-md-2"><label class="form-label">Thời gian quay đầu</label><input type="number" name="turnaroundTime" min="0" step="1" class="form-control" value="<%= form.turnaroundTime ?? '' %>"></div>

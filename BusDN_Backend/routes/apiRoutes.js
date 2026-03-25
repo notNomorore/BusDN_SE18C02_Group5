@@ -20,6 +20,14 @@ function getMonthDateRange(year, month) {
     return { validFrom, validTo };
 }
 
+const LAST_OPERATION_END_CAP = '19:30';
+const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+function toMinutes(hhmm) {
+    if (!hhmm || !TIME_RE.test(String(hhmm).trim())) return null;
+    const [h, m] = String(hhmm).trim().split(':').map(Number);
+    return h * 60 + m;
+}
+
 /**
  * API Routes for Mobile Clients (Expo/React Native)
  * All routes return JSON responses
@@ -1176,7 +1184,20 @@ router.post('/admin/routes/create', authMiddleware, async (req, res) => {
         if (bufferMinutes != null) payload.bufferMinutes = Math.max(0, Number(bufferMinutes) || 0);
 
         if (startTime && endTime) {
-            payload.operationTime = { start: startTime.trim(), end: endTime.trim() };
+            const start = startTime.trim();
+            const end = endTime.trim();
+            if (!TIME_RE.test(start) || !TIME_RE.test(end)) {
+                return res.status(400).json({ ok: false, message: 'Giờ vận hành phải đúng định dạng HH:mm.' });
+            }
+            const endM = toMinutes(end);
+            const capM = toMinutes(LAST_OPERATION_END_CAP);
+            if (endM != null && capM != null && endM > capM) {
+                return res.status(400).json({
+                    ok: false,
+                    message: `Giờ kết thúc không được vượt quá ${LAST_OPERATION_END_CAP}.`,
+                });
+            }
+            payload.operationTime = { start, end };
         }
 
         const newRoute = await Route.create(payload);
@@ -1218,7 +1239,20 @@ router.put('/admin/routes/:id', authMiddleware, async (req, res) => {
         if (bufferMinutes != null) route.bufferMinutes = Math.max(0, Number(bufferMinutes) || 0);
 
         if (startTime && endTime) {
-            route.operationTime = { start: startTime.trim(), end: endTime.trim() };
+            const start = startTime.trim();
+            const end = endTime.trim();
+            if (!TIME_RE.test(start) || !TIME_RE.test(end)) {
+                return res.status(400).json({ ok: false, message: 'Giờ vận hành phải đúng định dạng HH:mm.' });
+            }
+            const endM = toMinutes(end);
+            const capM = toMinutes(LAST_OPERATION_END_CAP);
+            if (endM != null && capM != null && endM > capM) {
+                return res.status(400).json({
+                    ok: false,
+                    message: `Giờ kết thúc không được vượt quá ${LAST_OPERATION_END_CAP}.`,
+                });
+            }
+            route.operationTime = { start, end };
         } else {
             route.operationTime = undefined;
         }

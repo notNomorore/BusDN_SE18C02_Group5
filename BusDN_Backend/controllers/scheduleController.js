@@ -454,11 +454,25 @@ exports.createSchedule = async (req, res) => {
             dryRun,
         } = req.body;
 
+        const normalizedShiftStart = shiftStart || req.body.startTime;
+        const normalizedShiftEnd = shiftEnd || req.body.endTime;
+
         if (!routeId || !date) return res.status(400).json({ ok: false, message: 'Tuyến và ngày là bắt buộc' });
-        if (!shiftStart || !shiftEnd) return res.status(400).json({ ok: false, message: 'Ca làm (bắt đầu / kết thúc) là bắt buộc' });
+        if (!normalizedShiftStart || !normalizedShiftEnd) return res.status(400).json({ ok: false, message: 'Ca làm (bắt đầu / kết thúc) là bắt buộc' });
 
         const route = await Route.findById(routeId).lean();
         if (!route) return res.status(404).json({ ok: false, message: 'Không tìm thấy tuyến' });
+
+        // Giới hạn ca kết thúc: xe phải về muộn nhất trước 19:30
+        const CAP_END = '19:30';
+        const capM = sb.toMinutes(CAP_END);
+        const endM = sb.toMinutes(normalizedShiftEnd);
+        if (capM != null && endM != null && endM > capM) {
+            return res.status(400).json({
+                ok: false,
+                message: `Giờ kết thúc ca không được vượt quá ${CAP_END}.`,
+            });
+        }
 
         const rt = Number(route.roundTripMinutes) || 60;
         const buf = Number(route.bufferMinutes) || 10;
@@ -476,7 +490,7 @@ exports.createSchedule = async (req, res) => {
             conductorId: conductorId || null,
             departureTime: departureTime || null,
             slotDurationMinutes: slotDur,
-            shiftTime: { start: shiftStart, end: shiftEnd },
+            shiftTime: { start: normalizedShiftStart, end: normalizedShiftEnd },
         };
 
         if (!candidate.slotDurationMinutes) {
@@ -540,8 +554,11 @@ exports.updateSchedule = async (req, res) => {
             return res.status(400).json({ ok: false, message: 'Chuyến đã hủy, không sửa được' });
         }
 
+        const normalizedShiftStart = shiftStart || req.body.startTime;
+        const normalizedShiftEnd = shiftEnd || req.body.endTime;
+
         const dep = departureTime !== undefined ? departureTime : existing.departureTime;
-        const startStr = shiftStart || existing.shiftTime?.start;
+        const startStr = normalizedShiftStart || existing.shiftTime?.start;
         const tripStart = combinedDateTime(existing.date, dep || startStr);
         const now = new Date();
         const minsUntil = (tripStart - now) / 60000;
@@ -576,10 +593,21 @@ exports.updateSchedule = async (req, res) => {
             departureTime: dep || null,
             slotDurationMinutes: slotDur,
             shiftTime: {
-                start: shiftStart || existing.shiftTime?.start,
-                end: shiftEnd || existing.shiftTime?.end,
+                start: normalizedShiftStart || existing.shiftTime?.start,
+                end: normalizedShiftEnd || existing.shiftTime?.end,
             },
         };
+
+        // Giới hạn ca kết thúc: xe phải về muộn nhất trước 19:30
+        const CAP_END = '19:30';
+        const capM = sb.toMinutes(CAP_END);
+        const endM = sb.toMinutes(candidate.shiftTime?.end);
+        if (capM != null && endM != null && endM > capM) {
+            return res.status(400).json({
+                ok: false,
+                message: `Giờ kết thúc ca không được vượt quá ${CAP_END}.`,
+            });
+        }
 
         const dayList = await loadSchedulesForDay(candidate.date, id);
         const { errors, warnings } = await validateScheduleAssignments(candidate, route, dayList);
