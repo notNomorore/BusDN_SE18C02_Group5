@@ -729,6 +729,166 @@ exports.deleteSchedule = async (req, res) => {
 };
 
 /**
+ * Xóa lịch hàng loạt (bulk) trong bảng Schedule
+ * Chỉ xóa status SCHEDULED (tránh xóa COMPLETED/IN_PROGRESS sai nghiệp vụ).
+ *
+ * Body:
+ * {
+ *   scope: 'ALL_ROUTES' | 'ROUTE',
+ *   routeId?: string,
+ *   timeMode: 'RANGE' | 'ALL_TIME',
+ *   dateFrom?: 'YYYY-MM-DD',
+ *   dateTo?: 'YYYY-MM-DD',
+ *   acknowledgeMonthlyPass?: boolean,
+ *   acknowledgeTripTickets?: boolean
+ * }
+ */
+exports.bulkDeleteSchedules = async (req, res) => {
+    try {
+        const {
+            scope = 'ALL_ROUTES',
+            routeId,
+            timeMode = 'RANGE',
+            dateFrom,
+            dateTo,
+            acknowledgeMonthlyPass = false,
+            acknowledgeTripTickets = false,
+        } = req.body || {};
+
+        if (scope === 'ROUTE' && !routeId) {
+            return res.status(400).json({ ok: false, message: 'Thiếu routeId' });
+        }
+
+        if (timeMode === 'RANGE' && (!dateFrom || !dateTo)) {
+            return res.status(400).json({ ok: false, message: 'Thiếu dateFrom hoặc dateTo' });
+        }
+
+        const q = {
+            status: 'SCHEDULED',
+            archived: { $ne: true },
+        };
+        if (scope === 'ROUTE') q.routeId = routeId;
+
+        let rangeStart = null;
+        let rangeEnd = null;
+
+        if (timeMode === 'RANGE') {
+            const days = sb.eachDateISO(String(dateFrom).slice(0, 10), String(dateTo).slice(0, 10));
+            if (!days.length) return res.status(400).json({ ok: false, message: 'Khoảng ngày không hợp lệ' });
+            rangeStart = new Date(days[0]);
+            rangeStart.setHours(0, 0, 0, 0);
+            rangeEnd = new Date(days[days.length - 1]);
+            rangeEnd.setHours(23, 59, 59, 999);
+            q.date = { $gte: rangeStart, $lte: rangeEnd };
+        }
+
+        const schedules = await Schedule.find(q).select('_id routeId date departureTime shiftTime driverId conductorId').lean();
+        if (!schedules.length) {
+            return res.json({ ok: true, message: 'Không có lịch SCHEDULED phù hợp để xóa', deletedCount: 0 });
+        }
+
+        const ids = schedules.map((s) => s._id);
+        const routeIds = [...new Set(schedules.map((s) => String(s.routeId)).filter(Boolean))];
+
+        // 1) Check vé lẻ đã đặt (BOOKED) theo lô
+        const bookedBySchedule = await TripTicket.aggregate([
+            { $match: { scheduleId: { $in: ids }, status: 'BOOKED' } },
+            { $group: { _id: '$scheduleId', cnt: { $sum: 1 } } },
+        ]);
+        const bookedMap = new Map(bookedBySchedule.map((r) => [String(r._id), Number(r.cnt || 0)]));
+        const totalBooked = bookedBySchedule.reduce((acc, r) => acc + Number(r.cnt || 0), 0);
+        if (totalBooked > 0 && !acknowledgeTripTickets) {
+            return res.status(409).json({
+                ok: false,
+                message: `Có ${totalBooked} vé lẻ đã đặt trong các chuyến sắp xóa — xác nhận trước khi xóa`,
+                code: 'TRIP_TICKET_WARNING',
+                activeTripTicketsBooked: totalBooked,
+            });
+        }
+
+        // 2) Check vé tháng (coarse theo khoảng thời gian). Mục tiêu: nhanh và an toàn (có vé tháng thì bắt xác nhận).
+        if (!acknowledgeMonthlyPass) {
+            const passMatch = {
+                routeId: { $in: routeIds },
+                status: 'ACTIVE',
+            };
+            if (timeMode === 'RANGE' && rangeStart && rangeEnd) {
+                passMatch.validFrom = { $lte: rangeEnd };
+                passMatch.validTo = { $gte: rangeStart };
+            }
+            const passCount = await MonthlyPass.countDocuments(passMatch);
+            if (passCount > 0) {
+                return res.status(409).json({
+                    ok: false,
+                    message: `Có ${passCount} vé tháng còn hiệu lực trong phạm vi xóa — xác nhận trước khi xóa`,
+                    code: 'MONTHLY_PASS_WARNING',
+                    activeMonthlyPassesOnDay: passCount,
+                });
+            }
+        }
+
+        // 3) Prefetch routeNumber để tránh lookup từng lịch khi emit notification
+        const routeRows = await Route.find({ _id: { $in: routeIds } }).select('_id routeNumber').lean();
+        const routeNumMap = new Map(routeRows.map((r) => [String(r._id), r.routeNumber]));
+
+        // 4) Nếu đã acknowledgeTripTickets, vẫn cần notify passengers đang có vé BOOKED
+        if (totalBooked > 0) {
+            const ticketRows = await TripTicket.find({ scheduleId: { $in: ids }, status: 'BOOKED' })
+                .select('scheduleId userId')
+                .lean();
+            const userIdsBySchedule = new Map();
+            for (const t of ticketRows) {
+                const sid = String(t.scheduleId);
+                const set = userIdsBySchedule.get(sid) || new Set();
+                set.add(String(t.userId));
+                userIdsBySchedule.set(sid, set);
+            }
+            const io = getIO();
+            if (io) {
+                for (const s of schedules) {
+                    const sid = String(s._id);
+                    const uSet = userIdsBySchedule.get(sid);
+                    if (!uSet || uSet.size === 0) continue;
+                    const payload = await scheduleNoticePayload('deleted', {
+                        ...s,
+                        routeId: { _id: s.routeId, routeNumber: routeNumMap.get(String(s.routeId)) },
+                    });
+                    if (!payload) continue;
+                    for (const uid of uSet) {
+                        io.to(`user:${uid}`).emit('notification:new', {
+                            ...payload,
+                            kind: 'TRIP_SCHEDULE',
+                            scheduleId: sid,
+                        });
+                    }
+                }
+            }
+        }
+
+        // 5) Emit schedule:changed và xóa theo lô
+        for (const s of schedules) {
+            emitScheduleChange('deleted', {
+                _id: s._id,
+                routeId: s.routeId,
+                date: s.date,
+                status: 'DELETED',
+                driverId: s.driverId,
+                conductorId: s.conductorId,
+                departureTime: s.departureTime,
+                shiftTime: s.shiftTime,
+            });
+        }
+        const delRes = await Schedule.deleteMany({ _id: { $in: ids } });
+        const deletedCount = Number(delRes.deletedCount || 0);
+
+        return res.json({ ok: true, message: `Đã xóa ${deletedCount} lịch SCHEDULED`, deletedCount });
+    } catch (err) {
+        console.error('bulkDeleteSchedules error:', err);
+        return res.status(500).json({ ok: false, message: 'Lỗi server' });
+    }
+};
+
+/**
  * Sinh nhiều chuyến theo tần suất tuyến (doc: bước 1–3)
  * Body: { routeId, dateFrom, dateTo, autoAssign?, replaceScheduled? }
  */

@@ -1410,6 +1410,7 @@ router.post('/admin/buses/create', authMiddleware, scheduleController.createBus)
 
 router.get('/admin/schedules', authMiddleware, scheduleController.getSchedules);
 router.post('/admin/schedules/generate', authMiddleware, scheduleController.generateSchedules);
+router.post('/admin/schedules/bulk-delete', authMiddleware, scheduleController.bulkDeleteSchedules);
 router.get('/admin/schedules/:id/delete-impact', authMiddleware, scheduleController.getDeleteImpact);
 router.post('/admin/schedules/:id/update-impact', authMiddleware, scheduleController.getUpdateImpact);
 router.patch('/admin/schedules/:id/archive', authMiddleware, scheduleController.archiveSchedule);
