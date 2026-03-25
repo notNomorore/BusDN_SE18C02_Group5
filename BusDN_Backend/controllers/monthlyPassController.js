@@ -496,7 +496,7 @@ function getVnpayBaseConfig(req) {
     const hashSecret = process.env.VNPAY_HASH_SECRET || "";
     const vnpUrl = process.env.VNPAY_URL || "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
     const returnUrl = process.env.VNPAY_MONTHLY_RETURN_URL
-        || `${buildBaseUrl(req)}/passenger/passes/monthly/vnpay-return`;
+        || `${buildBaseUrl(req)}/api/user/passes/monthly/vnpay-return`;
     return { tmnCode, hashSecret, vnpUrl, returnUrl };
 }
 
@@ -965,6 +965,16 @@ exports.purchaseMonthlyPass = async (req, res) => {
                 orderCode,
                 passType,
                 routeId,
+                routeSnapshot: passType === PASS_TYPE.SINGLE_ROUTE
+                    ? {
+                        routeId,
+                        routeNumber: route?.routeNumber || "",
+                        name: route?.name || ""
+                    }
+                    : {
+                        routeNumber: "LT",
+                        name: "Ve lien tuyen"
+                    },
                 month,
                 year,
                 promoCode: promoReserved?.code || "",

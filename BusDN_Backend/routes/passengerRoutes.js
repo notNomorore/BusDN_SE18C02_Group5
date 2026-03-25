@@ -4,6 +4,24 @@ const jwt = require("jsonwebtoken");
 
 const monthlyPassController = require("../controllers/monthlyPassController");
 
+function redirectToApiMonthlyPassReturn(req, res, apiPath) {
+    const query = new URLSearchParams();
+
+    Object.entries(req.query || {}).forEach(([key, value]) => {
+        if (Array.isArray(value)) {
+            value.forEach((item) => query.append(key, String(item)));
+            return;
+        }
+        if (value !== undefined && value !== null && value !== "") {
+            query.append(key, String(value));
+        }
+    });
+
+    const queryString = query.toString();
+    const target = `/api${apiPath}${queryString ? `?${queryString}` : ""}`;
+    return res.redirect(req.method === "GET" ? 302 : 307, target);
+}
+
 function requirePassenger(req, res, next) {
     const authHeader = String(req.headers.authorization || "").trim();
     const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
@@ -45,8 +63,12 @@ router.get("/passes/monthly/checkout", requirePassenger, (req, res) => {
     return monthlyPassController.purchaseMonthlyPass(req, res);
 });
 router.post("/passes/monthly/purchase", requirePassenger, monthlyPassController.purchaseMonthlyPass);
-router.get("/passes/monthly/vnpay-return", monthlyPassController.vnpayReturnMonthlyPass);
-router.get("/passes/monthly/momo-return", monthlyPassController.momoReturnMonthlyPass);
+router.get("/passes/monthly/vnpay-return", (req, res) => {
+    return redirectToApiMonthlyPassReturn(req, res, "/user/passes/monthly/vnpay-return");
+});
+router.all("/passes/monthly/momo-return", (req, res) => {
+    return redirectToApiMonthlyPassReturn(req, res, "/user/passes/monthly/momo-return");
+});
 
 /* My tickets */
 router.get("/monthly-pass", requirePassenger, monthlyPassController.getMyTicketsPage);

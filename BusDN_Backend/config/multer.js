@@ -13,7 +13,7 @@ const avatarStorage = multer.diskStorage({
 const priorityStorage = multer.diskStorage({
     destination: './public/uploads/priority/',
     filename: (req, file, cb) => {
-        const userId = req.session.userId || 'unknown';
+        const userId = req.session?.userId || req.user?.userId || req.user?._id || 'unknown';
         const timestamp = Date.now();
         const ext = path.extname(file.originalname);
         cb(null, `priority-${userId}-${timestamp}${ext}`);

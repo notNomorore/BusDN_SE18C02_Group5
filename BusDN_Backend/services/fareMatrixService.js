@@ -169,6 +169,7 @@ async function upsertFareMatrix(payload, userId = null) {
 
 function getPriorityDiscountPercentByCategory(category, matrix) {
     const config = matrix || getDefaultFareMatrix();
+    const defaultPercent = clampNumber(config?.priorityDiscounts?.defaultPercent, 0, 100, 0);
     const key = normalizeCategoryKey(category);
     const mapping = {
         student: config?.priorityDiscounts?.studentPercent,
@@ -179,9 +180,10 @@ function getPriorityDiscountPercentByCategory(category, matrix) {
     };
     const byCategory = mapping[key];
     if (byCategory !== null && byCategory !== undefined && byCategory !== "") {
-        return clampNumber(byCategory, 0, 100, 0);
+        const categoryPercent = clampNumber(byCategory, 0, 100, defaultPercent);
+        return categoryPercent > 0 ? categoryPercent : defaultPercent;
     }
-    return clampNumber(config?.priorityDiscounts?.defaultPercent, 0, 100, 0);
+    return defaultPercent;
 }
 
 function resolveMonthlyPassBasePrice(passType, routeMonthlyPassPrice, matrix) {

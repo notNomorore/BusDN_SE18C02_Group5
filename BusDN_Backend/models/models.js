@@ -308,7 +308,14 @@ const MonthlyPassSchema = new mongoose.Schema({
         enum: ['SINGLE_ROUTE', 'INTER_ROUTE'],
         default: 'SINGLE_ROUTE'
     },
-    routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route', required: true },
+    routeId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Route',
+        default: null,
+        required() {
+            return this.passType !== 'INTER_ROUTE';
+        }
+    },
     routeSnapshot: {
         routeNumber: { type: String, default: '' },
         name: { type: String, default: '' }

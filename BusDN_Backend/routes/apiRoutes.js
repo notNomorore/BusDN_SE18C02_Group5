@@ -2,8 +2,11 @@
 const router = express.Router();
 const authMiddleware = require('../middleware/authMiddleware');
 const { User, Route, Stop, PriorityProfile, MonthlyPass, WalletTransaction, Schedule, Bus, LostFound, Notification, Feedback, TripTicket, Promotion } = require('../models/models');
+const { priorityProfileUpload } = require('../config/multer');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const mongoose = require('mongoose');
+const QRCode = require('qrcode');
 const querystring = require('querystring');
 const { emitPendingPriorityCount, applyPriorityExpiryForUser } = require('../utils/priorityUtils');
 const scheduleController = require('../controllers/scheduleController'); // NEW
@@ -192,6 +195,29 @@ const mapPromotionPayloadFromApi = (body = {}) => {
 const parsePaymentMethod = (value) => (value === PAYMENT_METHOD.MOMO ? PAYMENT_METHOD.MOMO : PAYMENT_METHOD.VNPAY);
 
 const buildBaseUrl = (req) => process.env.APP_BASE_URL || `${req.protocol}://${req.get('host')}`;
+const buildFrontendBaseUrl = () => (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+const parsePositiveInt = (value) => {
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+const normalizeRouteId = (value) => {
+    const routeId = cleanText(value);
+    return routeId && mongoose.Types.ObjectId.isValid(routeId) ? routeId : '';
+};
+const buildRouteSnapshot = (route, fallback = {}) => ({
+    routeId: normalizeRouteId(route?._id || fallback.routeId),
+    routeNumber: cleanText(route?.routeNumber || fallback.routeNumber),
+    name: cleanText(route?.name || fallback.name)
+});
+const buildFrontendUrl = (path, params = {}) => {
+    const url = new URL(path, `${buildFrontendBaseUrl()}/`);
+    Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+            url.searchParams.set(key, String(value));
+        }
+    });
+    return url.toString();
+};
 
 const toOrderCode = () => {
     const now = Date.now();
@@ -261,7 +287,7 @@ const getVnpayBaseConfig = (req) => ({
     tmnCode: process.env.VNPAY_TMN_CODE || '',
     hashSecret: process.env.VNPAY_HASH_SECRET || '',
     vnpUrl: process.env.VNPAY_URL || 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
-    returnUrl: process.env.VNPAY_MONTHLY_RETURN_URL || `${buildBaseUrl(req)}/passenger/passes/monthly/vnpay-return`
+    returnUrl: process.env.VNPAY_MONTHLY_RETURN_URL || `${buildBaseUrl(req)}/api/user/passes/monthly/vnpay-return`
 });
 
 const signMomoRaw = (rawSignature, accessKey, secretKey) => crypto.createHmac('sha256', secretKey).update(rawSignature).digest('hex');
@@ -278,6 +304,170 @@ const createMomoPayment = async (payload) => {
         throw new Error(`Create MoMo link failed: ${JSON.stringify(json)}`);
     }
     return json;
+};
+
+const verifyVnpChecksum = (queryObj, hashSecret) => {
+    const cloned = { ...queryObj };
+    const secureHash = cloned.vnp_SecureHash;
+    delete cloned.vnp_SecureHash;
+    delete cloned.vnp_SecureHashType;
+    const calculated = signVnpParams(cloned, hashSecret);
+    return String(calculated).toLowerCase() === String(secureHash || '').toLowerCase();
+};
+
+const getMonthlyPassMetaFromTransaction = (tx) => {
+    const rawReturn = tx?.rawReturn && typeof tx.rawReturn === 'object' ? tx.rawReturn : {};
+    const routeSnapshot = rawReturn?.routeSnapshot && typeof rawReturn.routeSnapshot === 'object'
+        ? rawReturn.routeSnapshot
+        : {};
+    const routeId = normalizeRouteId(rawReturn.routeId || routeSnapshot.routeId);
+    const passType = rawReturn.passType === PASS_TYPE.INTER_ROUTE
+        ? PASS_TYPE.INTER_ROUTE
+        : (rawReturn.passType === PASS_TYPE.SINGLE_ROUTE || routeId ? PASS_TYPE.SINGLE_ROUTE : PASS_TYPE.INTER_ROUTE);
+
+    return {
+        passType,
+        routeId,
+        month: parsePositiveInt(rawReturn.month),
+        year: parsePositiveInt(rawReturn.year),
+        promoCode: normalizePromoCode(rawReturn.promoCode),
+        promotionId: cleanText(rawReturn.promotionId),
+        routeSnapshot: buildRouteSnapshot(null, routeSnapshot)
+    };
+};
+
+const mapMonthlyPassForClient = (pass) => {
+    if (!pass) return null;
+    return {
+        ...pass,
+        displayRouteNumber: pass.routeId?.routeNumber || pass.routeSnapshot?.routeNumber || '',
+        displayRouteName: pass.routeId?.name || pass.routeSnapshot?.name || 'Tuyen khong xac dinh'
+    };
+};
+
+const buildPassQrPayload = (pass) => JSON.stringify({
+    provider: 'BUSDN',
+    passCode: pass.passCode,
+    passType: pass.passType === PASS_TYPE.INTER_ROUTE ? 'LIEN_TUYEN' : 'DON_TUYEN',
+    route: pass.displayRouteNumber
+        ? `${pass.displayRouteNumber} - ${pass.displayRouteName || 'Tuyen xe'}`
+        : pass.displayRouteName,
+    period: `${String(pass.month).padStart(2, '0')}/${pass.year}`,
+    validFrom: pass.validFrom ? new Date(pass.validFrom).toLocaleDateString('vi-VN') : '-',
+    validTo: pass.validTo ? new Date(pass.validTo).toLocaleDateString('vi-VN') : '-',
+    pricePaid: Number(pass.pricePaid || 0),
+    status: pass.status
+});
+
+const generateMonthlyPassQrBuffer = (pass) => QRCode.toBuffer(buildPassQrPayload(pass), {
+    type: 'png',
+    width: 180,
+    margin: 1,
+    errorCorrectionLevel: 'M'
+});
+
+const buildMonthlyPassPageRedirectFromTransaction = (tx, type, message) => {
+    const meta = getMonthlyPassMetaFromTransaction(tx);
+    return buildFrontendUrl('/monthly-pass', {
+        [type]: message,
+        txnRef: tx?.txnRef || '',
+        paymentMethod: tx?.method || '',
+        passType: meta.passType,
+        routeId: meta.passType === PASS_TYPE.SINGLE_ROUTE ? meta.routeId : '',
+        month: meta.month || '',
+        year: meta.year || '',
+        promoCode: meta.promoCode || ''
+    });
+};
+
+const buildMonthlyPassResultRedirectFromTransaction = (tx, type, message, passId = '') => {
+    const meta = getMonthlyPassMetaFromTransaction(tx);
+    return buildFrontendUrl('/monthly-pass/result', {
+        [type]: message,
+        txnRef: tx?.txnRef || '',
+        paymentMethod: tx?.method || '',
+        passType: meta.passType,
+        routeId: meta.passType === PASS_TYPE.SINGLE_ROUTE ? meta.routeId : '',
+        month: meta.month || '',
+        year: meta.year || '',
+        amount: Number(tx?.amount || 0),
+        passId: passId || tx?.relatedMonthlyPassId || ''
+    });
+};
+
+const markMonthlyPassTransactionFailed = async (tx, status, note, rawIpn = null, extraSet = {}) => {
+    if (!tx?._id) return;
+    const setPayload = {
+        status,
+        note,
+        ...extraSet
+    };
+    if (rawIpn) {
+        setPayload.rawIpn = rawIpn;
+    }
+    await WalletTransaction.updateOne(
+        { _id: tx._id, status: 'PENDING' },
+        { $set: setPayload }
+    );
+};
+
+const createMonthlyPassFromTransaction = async (tx) => {
+    const meta = getMonthlyPassMetaFromTransaction(tx);
+    if (!meta.month || !meta.year) {
+        throw new Error('Missing pass period in transaction metadata.');
+    }
+    if (meta.passType === PASS_TYPE.SINGLE_ROUTE && !meta.routeId) {
+        throw new Error('Missing routeId for single-route monthly pass transaction.');
+    }
+
+    let route = null;
+    if (meta.passType === PASS_TYPE.SINGLE_ROUTE) {
+        route = await Route.findById(meta.routeId).lean();
+        if (!route || route.status !== 'ACTIVE') {
+            throw new Error('Route invalid or inactive.');
+        }
+    }
+
+    const duplicateFilter = {
+        userId: tx.userId,
+        month: meta.month,
+        year: meta.year,
+        passType: meta.passType,
+        status: { $ne: 'CANCELLED' }
+    };
+    if (meta.passType === PASS_TYPE.SINGLE_ROUTE) {
+        duplicateFilter.routeId = meta.routeId;
+    }
+
+    const existingPass = await MonthlyPass.findOne(duplicateFilter).lean();
+    if (existingPass) {
+        return existingPass;
+    }
+
+    const { validFrom, validTo } = getMonthDateRange(meta.year, meta.month);
+    const routeSnapshot = meta.passType === PASS_TYPE.SINGLE_ROUTE
+        ? buildRouteSnapshot(route, meta.routeSnapshot)
+        : buildRouteSnapshot(null, {
+            routeNumber: meta.routeSnapshot.routeNumber || 'LT',
+            name: meta.routeSnapshot.name || 'Ve lien tuyen'
+        });
+
+    return MonthlyPass.create({
+        userId: tx.userId,
+        passType: meta.passType,
+        routeId: meta.passType === PASS_TYPE.SINGLE_ROUTE ? meta.routeId : null,
+        routeSnapshot,
+        passCode: makePassCode(meta.year, meta.month, tx.userId),
+        month: meta.month,
+        year: meta.year,
+        validFrom,
+        validTo,
+        pricePaid: Number(tx.amount || 0),
+        originalPrice: Number.isFinite(Number(tx.originalAmount)) ? Number(tx.originalAmount) : null,
+        discountAmount: Number.isFinite(Number(tx.discountAmount)) ? Math.max(0, Number(tx.discountAmount)) : 0,
+        paidBy: tx.method === PAYMENT_METHOD.MOMO ? 'MOMO' : 'VNPAY',
+        status: 'ACTIVE'
+    });
 };
 
 const validatePromotionPayloadForApi = async (payload, mode = 'create') => {
@@ -397,6 +587,37 @@ const getPriorityDiscountInfo = async (userId, fareMatrix) => {
     }
 };
 
+const normalizePriorityProfileStatus = (status) => {
+    const value = String(status || '').trim().toUpperCase();
+    if (['PENDING', 'APPROVED', 'REJECTED', 'EXPIRED', 'NONE'].includes(value)) {
+        return value;
+    }
+    return 'NONE';
+};
+
+const mapPriorityProfileForApi = (user, profile) => {
+    const userPriority = user?.priorityProfile || {};
+
+    return {
+        type: String(profile?.category || userPriority.type || '').trim(),
+        cardNumber: String(profile?.idNumber || userPriority.cardNumber || '').trim(),
+        cardImageFront: String(profile?.idCardImageFront || userPriority.cardImageFront || '').trim(),
+        cardImageBack: String(profile?.idCardImageBack || userPriority.cardImageBack || '').trim(),
+        proofImage: String(profile?.proofImage || userPriority.proofImage || '').trim(),
+        rejectionReason: String(profile?.rejectionReason || userPriority.rejectionReason || '').trim(),
+        expiryDate: profile?.expiryDate || userPriority.expiryDate || null,
+        status: normalizePriorityProfileStatus(profile?.status || userPriority.status || user?.priorityStatus || 'NONE')
+    };
+};
+
+const resolvePriorityFilePath = (files, fieldName, fallbackValue = '') => {
+    const uploadedFileName = files?.[fieldName]?.[0]?.filename;
+    if (uploadedFileName) {
+        return `/uploads/priority/${uploadedFileName}`;
+    }
+    return String(fallbackValue || '').trim();
+};
+
 const validatePromotionForMonthlyPass = async ({
     promoCode,
     userId,
@@ -503,6 +724,10 @@ router.get('/user/profile', authMiddleware, async (req, res) => {
             return res.status(404).json({ ok: false, message: 'NgÆ°á»i dÃ¹ng khÃ´ng tá»“n táº¡i' });
         }
 
+        const priorityProfile = await PriorityProfile.findOne({ userId: user._id })
+            .sort({ updatedAt: -1, createdAt: -1 })
+            .lean();
+
         res.json({
             ok: true,
             user: {
@@ -514,9 +739,7 @@ router.get('/user/profile', authMiddleware, async (req, res) => {
                 role: user.role,
                 isVerified: user.isVerified,
                 walletBalance: user.walletBalance || 0,
-                priorityProfile: user.priorityProfile || {
-                    status: 'NONE'
-                }
+                priorityProfile: mapPriorityProfileForApi(user, priorityProfile)
             }
         });
     } catch (error) {
@@ -611,28 +834,58 @@ router.post('/user/change-password', authMiddleware, async (req, res) => {
  * Auth: Required
  * Body: { type, cardNumber, expiryDate, cardImageFront, cardImageBack }
  */
-router.post('/user/register-priority', authMiddleware, async (req, res) => {
+router.post(
+    '/user/register-priority',
+    authMiddleware,
+    priorityProfileUpload.fields([
+        { name: 'cardImageFront', maxCount: 1 },
+        { name: 'cardImageBack', maxCount: 1 },
+        { name: 'proofImage', maxCount: 1 }
+    ]),
+    async (req, res) => {
     try {
-        const { type, cardNumber, expiryDate, cardImageFront, cardImageBack } = req.body;
+        const body = req.body || {};
+        const type = String(body.type || '').trim();
+        const cardNumber = String(body.cardNumber || '').trim();
         const user = await User.findById(req.user.userId);
 
         if (!user) {
             return res.status(404).json({ ok: false, message: 'NgÆ°á»i dÃ¹ng khÃ´ng tá»“n táº¡i' });
         }
 
+        if (!type || !cardNumber) {
+            return res.status(400).json({ ok: false, message: 'Vui lòng nhập loại ưu tiên và số thẻ.' });
+        }
+        if (!['Student', 'War Veteran', 'Disabled', 'Elderly', 'Other'].includes(type)) {
+            return res.status(400).json({ ok: false, message: 'Loại ưu tiên không hợp lệ.' });
+        }
+
+        const existingProfile = await PriorityProfile.findOne({ userId: user._id })
+            .sort({ updatedAt: -1, createdAt: -1 })
+            .lean();
+        if (existingProfile?.status === 'pending') {
+            return res.status(409).json({ ok: false, message: 'Hồ sơ ưu tiên của bạn đang chờ duyệt.' });
+        }
+
+        const cardImageFront = resolvePriorityFilePath(req.files, 'cardImageFront', body.cardImageFront);
+        const cardImageBack = resolvePriorityFilePath(req.files, 'cardImageBack', body.cardImageBack);
+        const proofImage = resolvePriorityFilePath(req.files, 'proofImage', body.proofImage);
+        if (!cardImageFront || !cardImageBack || !proofImage) {
+            return res.status(400).json({ ok: false, message: 'Vui lòng tải lên đầy đủ 3 ảnh giấy tờ.' });
+        }
+
         user.priorityProfile = {
-            type,
             cardNumber,
-            expiryDate,
             cardImageFront,
             cardImageBack,
+            expiryDate: null,
             status: 'PENDING'
         };
         user.isPriorityGroup = false;
         user.priorityStatus = 'PENDING';
 
         await user.save();
-        await PriorityProfile.findOneAndUpdate(
+        const priorityProfile = await PriorityProfile.findOneAndUpdate(
             { userId: user._id },
             {
                 userId: user._id,
@@ -640,7 +893,7 @@ router.post('/user/register-priority', authMiddleware, async (req, res) => {
                 idNumber: cardNumber || 'N/A',
                 idCardImageFront: cardImageFront || '',
                 idCardImageBack: cardImageBack || '',
-                proofImage: cardImageFront || '',
+                proofImage: proofImage || '',
                 status: 'pending',
                 rejectionReason: null,
                 expiryDate: null
@@ -652,7 +905,7 @@ router.post('/user/register-priority', authMiddleware, async (req, res) => {
         return res.json({
             ok: true,
             message: 'ÄÆ¡n Ä‘Äƒng kÃ½ Æ°u tiÃªn Ä‘ang chá» xÃ¡c nháº­n',
-            priorityProfile: user.priorityProfile
+            priorityProfile: mapPriorityProfileForApi(user, priorityProfile)
         });
     } catch (error) {
         console.error('Error registering priority:', error);
@@ -667,11 +920,14 @@ router.post('/user/register-priority', authMiddleware, async (req, res) => {
  */
 router.get('/user/priority-status', authMiddleware, async (req, res) => {
     try {
-        const user = await User.findById(req.user.userId).select('priorityProfile');
+        const user = await User.findById(req.user.userId).select('priorityProfile priorityStatus');
+        const priorityProfile = await PriorityProfile.findOne({ userId: req.user.userId })
+            .sort({ updatedAt: -1, createdAt: -1 })
+            .lean();
 
         res.json({
             ok: true,
-            priorityProfile: user.priorityProfile || { status: 'NONE' }
+            priorityProfile: mapPriorityProfileForApi(user, priorityProfile)
         });
     } catch (error) {
         console.error('Error fetching priority status:', error);
@@ -1306,16 +1562,23 @@ router.post('/user/passes/monthly/checkout', authMiddleware, async (req, res) =>
         let promotion = null;
         let promoDiscount = 0;
         if (promoCode) {
-            const promoResult = await validatePromotionForMonthlyPass({
-                promoCode,
-                userId,
-                passType,
-                routeId,
-                baseForPromo: priceAfterPriority,
-                now
-            });
-            promotion = promoResult.promotion;
-            promoDiscount = promoResult.discountAmount;
+            try {
+                const promoResult = await validatePromotionForMonthlyPass({
+                    promoCode,
+                    userId,
+                    passType,
+                    routeId,
+                    baseForPromo: priceAfterPriority,
+                    now
+                });
+                promotion = promoResult.promotion;
+                promoDiscount = promoResult.discountAmount;
+            } catch (promoError) {
+                return res.status(400).json({
+                    ok: false,
+                    message: promoError?.message || 'Khong the ap ma giam gia cho ve thang nay.'
+                });
+            }
         }
 
         const finalPrice = Math.max(1, priceAfterPriority - promoDiscount);
@@ -1336,12 +1599,16 @@ router.post('/user/passes/monthly/checkout', authMiddleware, async (req, res) =>
                 orderCode,
                 passType,
                 routeId,
+                routeSnapshot: passType === PASS_TYPE.SINGLE_ROUTE
+                    ? buildRouteSnapshot(route, { routeId })
+                    : { routeId: '', routeNumber: 'LT', name: 'Ve lien tuyen' },
                 month,
                 year,
                 promoCode: promotion?.code || '',
                 promotionId: promotion?._id || '',
                 promoDiscount,
-                promoReleased: false
+                promoReleased: false,
+                promoConsumed: false
             }
         });
 
@@ -1379,7 +1646,7 @@ router.post('/user/passes/monthly/checkout', authMiddleware, async (req, res) =>
             const partnerCode = process.env.MOMO_PARTNER_CODE || '';
             const accessKey = process.env.MOMO_ACCESS_KEY || '';
             const secretKey = process.env.MOMO_SECRET_KEY || '';
-            const redirectUrl = process.env.MOMO_MONTHLY_RETURN_URL || `${buildBaseUrl(req)}/passenger/passes/monthly/momo-return`;
+            const redirectUrl = process.env.MOMO_MONTHLY_RETURN_URL || `${buildBaseUrl(req)}/api/user/passes/monthly/momo-return`;
             const ipnUrl = process.env.MOMO_MONTHLY_RETURN_URL || redirectUrl;
             const orderInfo = `Thanh toán vé tháng ${txnRef}`;
             const requestId = txnRef;
@@ -1429,6 +1696,250 @@ router.post('/user/passes/monthly/checkout', authMiddleware, async (req, res) =>
     } catch (error) {
         console.error('Error creating monthly pass checkout:', error);
         return res.status(500).json({ ok: false, message: error?.message || 'Không thể khởi tạo thanh toán.' });
+    }
+});
+
+router.get('/user/passes/monthly/vnpay-return', async (req, res) => {
+    let tx = null;
+    try {
+        const query = { ...req.query };
+        const { hashSecret } = getVnpayBaseConfig(req);
+
+        if (!hashSecret) {
+            return res.redirect(buildFrontendUrl('/monthly-pass', {
+                error: 'Thieu cau hinh VNPAY hash secret.'
+            }));
+        }
+        if (!query.vnp_TxnRef) {
+            return res.redirect(buildFrontendUrl('/monthly-pass', {
+                error: 'Thieu thong tin giao dich VNPAY.'
+            }));
+        }
+        if (!verifyVnpChecksum(query, hashSecret)) {
+            return res.redirect(buildFrontendUrl('/monthly-pass', {
+                error: 'Chu ky VNPAY khong hop le.'
+            }));
+        }
+
+        tx = await WalletTransaction.findOne({ txnRef: query.vnp_TxnRef });
+        if (!tx) {
+            return res.redirect(buildFrontendUrl('/monthly-pass', {
+                error: 'Khong tim thay giao dich VNPAY.'
+            }));
+        }
+        if (tx.status === 'SUCCESS') {
+            return res.redirect(buildMonthlyPassResultRedirectFromTransaction(
+                tx,
+                'success',
+                'Giao dich da duoc xac nhan thanh cong.',
+                tx.relatedMonthlyPassId
+            ));
+        }
+        if (tx.status === 'FAILED' || tx.status === 'CANCELLED') {
+            return res.redirect(buildMonthlyPassPageRedirectFromTransaction(
+                tx,
+                'error',
+                tx.note || 'Giao dich VNPAY khong thanh cong.'
+            ));
+        }
+
+        const vnpAmount = Number(query.vnp_Amount || 0) / 100;
+        if (!vnpAmount || Number(tx.amount) !== vnpAmount) {
+            await markMonthlyPassTransactionFailed(tx, 'FAILED', 'Invalid VNPAY amount.', query);
+            return res.redirect(buildMonthlyPassPageRedirectFromTransaction(tx, 'error', 'Sai lech so tien giao dich.'));
+        }
+
+        const isSuccess = query.vnp_ResponseCode === '00'
+            && (!query.vnp_TransactionStatus || query.vnp_TransactionStatus === '00');
+
+        if (!isSuccess) {
+            const nextStatus = query.vnp_ResponseCode === '24' ? 'CANCELLED' : 'FAILED';
+            const message = nextStatus === 'CANCELLED'
+                ? 'Ban da huy thanh toan VNPAY va quay lai man hinh mua ve.'
+                : 'Thanh toan VNPAY that bai. Vui long thu lai.';
+            await markMonthlyPassTransactionFailed(
+                tx,
+                nextStatus,
+                `VNPAY failed (${query.vnp_ResponseCode || 'N/A'})`,
+                query
+            );
+            return res.redirect(buildMonthlyPassPageRedirectFromTransaction(tx, 'error', message));
+        }
+
+        let pass;
+        try {
+            pass = await createMonthlyPassFromTransaction(tx);
+        } catch (activationError) {
+            await markMonthlyPassTransactionFailed(
+                tx,
+                'FAILED',
+                `Payment confirmed but monthly pass activation failed: ${activationError?.message || 'Unknown error.'}`,
+                query
+            );
+            return res.redirect(buildMonthlyPassPageRedirectFromTransaction(
+                tx,
+                'error',
+                'Thanh toan da duoc ghi nhan nhung kich hoat ve that bai. Vui long lien he ho tro.'
+            ));
+        }
+
+        const promoId = cleanText(tx?.rawReturn?.promotionId);
+        const shouldConsumePromo = Boolean(promoId && !tx?.rawReturn?.promoConsumed);
+        if (shouldConsumePromo) {
+            await Promotion.updateOne({ _id: promoId }, { $inc: { usageCount: 1 } });
+        }
+
+        await WalletTransaction.updateOne(
+            { _id: tx._id },
+            {
+                $set: {
+                    status: 'SUCCESS',
+                    method: 'VNPAY',
+                    relatedMonthlyPassId: pass?._id || null,
+                    paidAt: new Date(),
+                    note: `VNPAY paid txnRef ${tx.txnRef}`,
+                    rawIpn: query,
+                    ...(shouldConsumePromo ? { 'rawReturn.promoConsumed': true } : {})
+                }
+            }
+        );
+
+        return res.redirect(buildMonthlyPassResultRedirectFromTransaction(
+            tx,
+            'success',
+            'Thanh toan VNPAY thanh cong. Ve thang da duoc kich hoat.',
+            pass?._id
+        ));
+    } catch (error) {
+        console.error('Error handling monthly pass VNPAY return:', error);
+        if (tx) {
+            await markMonthlyPassTransactionFailed(
+                tx,
+                'FAILED',
+                error?.message || 'Error handling VNPAY return.',
+                req.query
+            );
+            return res.redirect(buildMonthlyPassPageRedirectFromTransaction(
+                tx,
+                'error',
+                'Loi xu ly ket qua thanh toan VNPAY.'
+            ));
+        }
+        return res.redirect(buildFrontendUrl('/monthly-pass', {
+            error: 'Loi xu ly ket qua thanh toan VNPAY.'
+        }));
+    }
+});
+
+router.all('/user/passes/monthly/momo-return', async (req, res) => {
+    let tx = null;
+    try {
+        const orderId = cleanText(req.query.orderId || req.body?.orderId);
+        const resultCode = cleanText(req.query.resultCode || req.body?.resultCode);
+        if (!orderId) {
+            return res.redirect(buildFrontendUrl('/monthly-pass', {
+                error: 'Phien thanh toan MoMo khong hop le.'
+            }));
+        }
+
+        tx = await WalletTransaction.findOne({ txnRef: orderId });
+        if (!tx) {
+            return res.redirect(buildFrontendUrl('/monthly-pass', {
+                error: 'Khong tim thay giao dich MoMo.'
+            }));
+        }
+        if (tx.status === 'SUCCESS') {
+            return res.redirect(buildMonthlyPassResultRedirectFromTransaction(
+                tx,
+                'success',
+                'Giao dich da duoc xac nhan thanh cong.',
+                tx.relatedMonthlyPassId
+            ));
+        }
+        if (tx.status === 'FAILED' || tx.status === 'CANCELLED') {
+            return res.redirect(buildMonthlyPassPageRedirectFromTransaction(
+                tx,
+                'error',
+                tx.note || 'Giao dich MoMo khong thanh cong.'
+            ));
+        }
+
+        if (resultCode !== '0') {
+            const nextStatus = resultCode === '1006' ? 'CANCELLED' : 'FAILED';
+            const message = nextStatus === 'CANCELLED'
+                ? 'Ban da huy thanh toan MoMo va quay lai man hinh mua ve.'
+                : 'Thanh toan MoMo that bai. Vui long thu lai.';
+            await markMonthlyPassTransactionFailed(
+                tx,
+                nextStatus,
+                `MoMo failed (${resultCode || 'N/A'})`,
+                req.query
+            );
+            return res.redirect(buildMonthlyPassPageRedirectFromTransaction(tx, 'error', message));
+        }
+
+        let pass;
+        try {
+            pass = await createMonthlyPassFromTransaction(tx);
+        } catch (activationError) {
+            await markMonthlyPassTransactionFailed(
+                tx,
+                'FAILED',
+                `Payment confirmed but monthly pass activation failed: ${activationError?.message || 'Unknown error.'}`,
+                req.query
+            );
+            return res.redirect(buildMonthlyPassPageRedirectFromTransaction(
+                tx,
+                'error',
+                'Thanh toan da duoc ghi nhan nhung kich hoat ve that bai. Vui long lien he ho tro.'
+            ));
+        }
+
+        const promoId = cleanText(tx?.rawReturn?.promotionId);
+        const shouldConsumePromo = Boolean(promoId && !tx?.rawReturn?.promoConsumed);
+        if (shouldConsumePromo) {
+            await Promotion.updateOne({ _id: promoId }, { $inc: { usageCount: 1 } });
+        }
+
+        await WalletTransaction.updateOne(
+            { _id: tx._id },
+            {
+                $set: {
+                    status: 'SUCCESS',
+                    method: 'MOMO',
+                    relatedMonthlyPassId: pass?._id || null,
+                    paidAt: new Date(),
+                    note: `MoMo paid orderId ${orderId}`,
+                    rawIpn: req.query,
+                    ...(shouldConsumePromo ? { 'rawReturn.promoConsumed': true } : {})
+                }
+            }
+        );
+
+        return res.redirect(buildMonthlyPassResultRedirectFromTransaction(
+            tx,
+            'success',
+            'Thanh toan MoMo thanh cong. Ve thang da duoc kich hoat.',
+            pass?._id
+        ));
+    } catch (error) {
+        console.error('Error handling monthly pass MoMo return:', error);
+        if (tx) {
+            await markMonthlyPassTransactionFailed(
+                tx,
+                'FAILED',
+                error?.message || 'Error handling MoMo return.',
+                req.query
+            );
+            return res.redirect(buildMonthlyPassPageRedirectFromTransaction(
+                tx,
+                'error',
+                'Loi xu ly ket qua thanh toan MoMo.'
+            ));
+        }
+        return res.redirect(buildFrontendUrl('/monthly-pass', {
+            error: 'Loi xu ly ket qua thanh toan MoMo.'
+        }));
     }
 });
 
@@ -1584,6 +2095,56 @@ router.post('/user/passes/monthly/purchase', authMiddleware, async (req, res) =>
     } catch (error) {
         console.error('Error purchasing monthly pass:', error);
         res.status(500).json({ ok: false, message: 'Lá»—i server' });
+    }
+});
+
+router.get('/user/passes/monthly/:passId', authMiddleware, async (req, res) => {
+    try {
+        const userId = req.user.userId;
+        const passId = cleanText(req.params.passId);
+        if (!mongoose.Types.ObjectId.isValid(passId)) {
+            return res.status(400).json({ ok: false, message: 'Pass id khong hop le.' });
+        }
+
+        const pass = await MonthlyPass.findOne({ _id: passId, userId })
+            .populate('routeId', 'routeNumber name')
+            .lean();
+        if (!pass) {
+            return res.status(404).json({ ok: false, message: 'Khong tim thay ve thang.' });
+        }
+
+        return res.json({
+            ok: true,
+            pass: mapMonthlyPassForClient(pass)
+        });
+    } catch (error) {
+        console.error('Error fetching monthly pass detail:', error);
+        return res.status(500).json({ ok: false, message: 'Khong the tai chi tiet ve thang.' });
+    }
+});
+
+router.get('/user/passes/monthly/:passId/qr', authMiddleware, async (req, res) => {
+    try {
+        const userId = req.user.userId;
+        const passId = cleanText(req.params.passId);
+        if (!mongoose.Types.ObjectId.isValid(passId)) {
+            return res.status(400).json({ ok: false, message: 'Pass id khong hop le.' });
+        }
+
+        const pass = await MonthlyPass.findOne({ _id: passId, userId })
+            .populate('routeId', 'routeNumber name')
+            .lean();
+        if (!pass) {
+            return res.status(404).json({ ok: false, message: 'Khong tim thay ve thang.' });
+        }
+
+        const qrBuffer = await generateMonthlyPassQrBuffer(mapMonthlyPassForClient(pass));
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Cache-Control', 'private, max-age=300');
+        return res.send(qrBuffer);
+    } catch (error) {
+        console.error('Error generating monthly pass QR:', error);
+        return res.status(500).json({ ok: false, message: 'Khong the tao ma QR cho ve thang.' });
     }
 });
 
