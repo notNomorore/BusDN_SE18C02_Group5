@@ -5,7 +5,8 @@ const { sendEmail } = require('../config/helpers');
 const {
     getMinPriorityExpiryDate,
     isExpiryDateValid,
-    emitPendingPriorityCount
+    emitPendingPriorityCount,
+    applyPriorityExpiryForUser
 } = require('../utils/priorityUtils');
 
 const getApprovalEmailHtml = (fullName, expiryDate) => `
@@ -75,23 +76,35 @@ const syncUserPriorityRejected = async (userId, profile) => {
     });
 };
 
+const getLatestPriorityProfileForUser = async (userId) => {
+    if (!userId) return null;
+    return PriorityProfile.findOne({ userId })
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .lean();
+};
+
 exports.getRegisterForm = async (req, res) => {
     try {
         if (!req.session.userId) {
             return res.redirect('/login');
         }
 
-        const user = await User.findById(req.session.userId);
+        let user = await User.findById(req.session.userId);
         if (!user) return res.status(404).send('User not found');
 
-        const profile = await PriorityProfile.findOne({ userId: req.session.userId });
-        if (profile?.status === 'approved') {
+        await applyPriorityExpiryForUser(user._id);
+        user = await User.findById(req.session.userId);
+
+        const profile = await getLatestPriorityProfileForUser(req.session.userId);
+        const currentStatus = String(user?.priorityStatus || user?.priorityProfile?.status || profile?.status || '').toUpperCase();
+
+        if (currentStatus === 'APPROVED') {
             return res.redirect('/priority/view');
         }
-        if (profile?.status === 'pending') {
+        if (currentStatus === 'PENDING') {
             return res.redirect('/priority/status');
         }
-        if (profile?.status === 'rejected') {
+        if (currentStatus === 'REJECTED') {
             return res.render('priority-register', {
                 user,
                 error: `Ho so truoc do da bi tu choi. Ly do: ${profile.rejectionReason}`,
@@ -114,7 +127,9 @@ exports.submitRegistration = async (req, res) => {
         }
 
         const { category, idNumber } = req.body;
-        const user = await User.findById(req.session.userId);
+        let user = await User.findById(req.session.userId);
+        await applyPriorityExpiryForUser(user._id);
+        user = await User.findById(req.session.userId);
 
         if (!category || !idNumber) {
             return res.render('priority-register', {
@@ -134,18 +149,15 @@ exports.submitRegistration = async (req, res) => {
             });
         }
 
-        let profile = await PriorityProfile.findOne({ userId: req.session.userId });
-        if (profile?.status === 'pending') {
+        let profile = await getLatestPriorityProfileForUser(req.session.userId);
+        const currentStatus = String(user?.priorityStatus || user?.priorityProfile?.status || profile?.status || '').toUpperCase();
+        if (['PENDING', 'APPROVED'].includes(currentStatus)) {
             return res.render('priority-register', {
                 user,
-                error: 'Ho so dang cho duyet. Vui long doi ket qua.',
+                error: 'Ho so dang cho duyet hoac dang hoat dong. Vui long doi ket qua.',
                 success: null,
                 oldProfile: profile
             });
-        }
-
-        if (profile) {
-            deleteOldFiles(profile);
         }
 
         const profileData = {
@@ -160,11 +172,7 @@ exports.submitRegistration = async (req, res) => {
             expiryDate: null
         };
 
-        if (profile) {
-            profile = await PriorityProfile.findByIdAndUpdate(profile._id, profileData, { new: true });
-        } else {
-            profile = await PriorityProfile.create(profileData);
-        }
+        profile = await PriorityProfile.create(profileData);
 
         await syncUserPriorityPending(req.session.userId, profile);
         await emitPendingPriorityCount();
@@ -203,10 +211,18 @@ exports.getStatus = async (req, res) => {
         if (!req.session.userId) {
             return res.redirect('/login');
         }
-        const user = await User.findById(req.session.userId);
-        const profile = await PriorityProfile.findOne({ userId: req.session.userId });
-        if (!profile) {
+        let user = await User.findById(req.session.userId);
+        await applyPriorityExpiryForUser(user._id);
+        user = await User.findById(req.session.userId);
+
+        const profile = await getLatestPriorityProfileForUser(req.session.userId);
+        const currentStatus = String(user?.priorityStatus || user?.priorityProfile?.status || profile?.status || '').toUpperCase();
+
+        if (!profile || currentStatus === 'REJECTED' || currentStatus === 'EXPIRED' || currentStatus === 'NONE') {
             return res.redirect('/priority/register');
+        }
+        if (currentStatus === 'APPROVED') {
+            return res.redirect('/priority/view');
         }
         return res.render('priority-status', { user, profile, message: null });
     } catch (error) {
@@ -220,9 +236,13 @@ exports.viewProfile = async (req, res) => {
         if (!req.session.userId) {
             return res.redirect('/login');
         }
-        const user = await User.findById(req.session.userId);
-        const profile = await PriorityProfile.findOne({ userId: req.session.userId });
-        if (!profile || profile.status !== 'approved') {
+        let user = await User.findById(req.session.userId);
+        await applyPriorityExpiryForUser(user._id);
+        user = await User.findById(req.session.userId);
+
+        const profile = await getLatestPriorityProfileForUser(req.session.userId);
+        const currentStatus = String(user?.priorityStatus || user?.priorityProfile?.status || profile?.status || '').toUpperCase();
+        if (!profile || currentStatus !== 'APPROVED') {
             return res.redirect('/priority/register');
         }
         return res.render('priority-view', { user, profile });

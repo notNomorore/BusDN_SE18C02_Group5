@@ -1,5 +1,5 @@
 const { User, Route, MonthlyPass, WalletTransaction, Promotion } = require("../models/models");
-const { PRIORITY_DISCOUNT_RATE, applyPriorityExpiryForUser, applyPriorityDiscount } = require("../utils/priorityUtils");
+const { applyPriorityExpiryForUser } = require("../utils/priorityUtils");
 const crypto = require("crypto");
 const querystring = require("querystring");
 const mongoose = require("mongoose");
@@ -189,6 +189,48 @@ function calcPromotionDiscount(orderAmount, promotion) {
     return Math.max(0, Math.min(discount, amount));
 }
 
+function calcPriorityDiscountAmount(orderAmount, discountPercent) {
+    const amount = Number(orderAmount || 0);
+    const percent = Math.max(0, Math.min(100, Number(discountPercent || 0)));
+    if (!Number.isFinite(amount) || amount <= 0 || percent <= 0) return 0;
+    return Math.round((amount * percent) / 100);
+}
+
+function applyPriorityDiscountByPercent(orderAmount, discountPercent) {
+    const amount = Number(orderAmount || 0);
+    return Math.max(0, amount - calcPriorityDiscountAmount(amount, discountPercent));
+}
+
+async function syncPromotionLifecycleStatuses(now = new Date()) {
+    const mutableFilter = { status: { $nin: ["DRAFT", "CANCELLED", "ENDED"] } };
+
+    await Promise.all([
+        Promotion.updateMany(
+            {
+                ...mutableFilter,
+                endAt: { $lt: now }
+            },
+            { $set: { status: "ENDED" } }
+        ),
+        Promotion.updateMany(
+            {
+                ...mutableFilter,
+                startAt: { $gt: now },
+                endAt: { $gte: now }
+            },
+            { $set: { status: "SCHEDULED" } }
+        ),
+        Promotion.updateMany(
+            {
+                ...mutableFilter,
+                startAt: { $lte: now },
+                endAt: { $gte: now }
+            },
+            { $set: { status: "ACTIVE" } }
+        )
+    ]);
+}
+
 async function validateAndReservePromotion({
     promoCode,
     userId,
@@ -199,6 +241,8 @@ async function validateAndReservePromotion({
 }) {
     const empty = { promotion: null, discountAmount: 0 };
     if (!promoCode) return empty;
+
+    await syncPromotionLifecycleStatuses(now);
 
     const promotion = await Promotion.findOne({ code: promoCode }).lean();
     if (!promotion) {
@@ -236,7 +280,7 @@ async function validateAndReservePromotion({
         const usedByUser = await WalletTransaction.countDocuments({
             userId,
             txnType: "MONTHLY_PASS",
-            status: "SUCCESS",
+            status: { $in: ["PENDING", "SUCCESS"] },
             "rawReturn.promotionId": String(promotion._id)
         });
         if (usedByUser >= Number(promotion.usageLimitPerUser)) {
@@ -287,6 +331,8 @@ async function validatePromotionWithoutReserve({
         return { promotion: null, discountAmount: 0 };
     }
 
+    await syncPromotionLifecycleStatuses(now);
+
     const promotion = await Promotion.findOne({ code: promoCode }).lean();
     if (!promotion) {
         throw new Error("M\u00e3 gi\u1ea3m gi\u00e1 kh\u00f4ng t\u1ed3n t\u1ea1i.");
@@ -322,7 +368,7 @@ async function validatePromotionWithoutReserve({
         const usedByUser = await WalletTransaction.countDocuments({
             userId,
             txnType: "MONTHLY_PASS",
-            status: "SUCCESS",
+            status: { $in: ["PENDING", "SUCCESS"] },
             "rawReturn.promotionId": String(promotion._id)
         });
         if (usedByUser >= Number(promotion.usageLimitPerUser)) {
@@ -496,6 +542,7 @@ function getVnpayBaseConfig(req) {
     const hashSecret = process.env.VNPAY_HASH_SECRET || "";
     const vnpUrl = process.env.VNPAY_URL || "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
     const returnUrl = process.env.VNPAY_MONTHLY_RETURN_URL
+        || process.env.VNPAY_RETURN_URL
         || `${buildBaseUrl(req)}/api/user/passes/monthly/vnpay-return`;
     return { tmnCode, hashSecret, vnpUrl, returnUrl };
 }
@@ -688,7 +735,6 @@ exports.getMonthlyPassPage = async (req, res) => {
 
         const user = await User.findById(req.session.userId).lean();
         if (!user) return res.redirect("/login");
-        const discountRate = user.isPriorityGroup ? PRIORITY_DISCOUNT_RATE : 0;
 
         const routes = await Route.find({ status: "ACTIVE" })
             .sort({ routeNumber: 1, name: 1 })
@@ -795,7 +841,7 @@ exports.previewPromotion = async (req, res) => {
 
         const priorityDiscount = await getPriorityDiscountInfo(userId, fareMatrix);
         const discountPercent = priorityDiscount.discountPercent;
-        const priceAfterPriority = applyPriorityDiscount(basePrice, discountPercent);
+        const priceAfterPriority = applyPriorityDiscountByPercent(basePrice, discountPercent);
 
         if (!promoCode) {
             return res.json({
@@ -841,6 +887,8 @@ exports.previewPromotion = async (req, res) => {
     }
 };
 exports.purchaseMonthlyPass = async (req, res) => {
+    let tx = null;
+    let promoReserved = null;
     try {
         if (!isPassenger(req)) return res.redirect("/login");
 
@@ -926,9 +974,8 @@ exports.purchaseMonthlyPass = async (req, res) => {
         }
 
         const priority = await getPriorityDiscountInfo(userId, fareMatrix);
-        const priceAfterPriority = applyPriorityDiscount(basePrice, priority.discountPercent);
+        const priceAfterPriority = applyPriorityDiscountByPercent(basePrice, priority.discountPercent);
 
-        let promoReserved = null;
         let promoDiscount = 0;
 
         if (promoCode) {
@@ -951,7 +998,7 @@ exports.purchaseMonthlyPass = async (req, res) => {
         const orderCode = toOrderCode();
         const txnRef = `${paymentMethod}-MP-${orderCode}`;
 
-        const tx = await WalletTransaction.create({
+        tx = await WalletTransaction.create({
             userId,
             amount: finalPrice,
             originalAmount: basePrice,
@@ -1030,7 +1077,30 @@ exports.purchaseMonthlyPass = async (req, res) => {
 
     } catch (err) {
         console.error("purchaseMonthlyPass:", err);
-        return res.redirect(pageRedirectWithMsg("error", "Co loi xay ra."));
+        if (tx?._id) {
+            try {
+                await WalletTransaction.updateOne(
+                    { _id: tx._id, status: "PENDING" },
+                    {
+                        $set: {
+                            status: "FAILED",
+                            note: err?.message || "Kh?ng th? kh?i t?o thanh to?n.",
+                            ...(promoReserved?._id ? { "rawReturn.promoReleased": true } : {})
+                        }
+                    }
+                );
+            } catch (updateErr) {
+                console.error("Failed to mark monthly pass checkout as failed:", updateErr);
+            }
+        }
+        if (promoReserved?._id) {
+            try {
+                await releasePromotionReservation(promoReserved._id);
+            } catch (releaseErr) {
+                console.error("Failed to release promotion reservation:", releaseErr);
+            }
+        }
+        return res.redirect(pageRedirectWithMsg("error", "C? l?i x?y ra.", backQuery));
     }
 };
 
@@ -1082,20 +1152,37 @@ exports.vnpayReturnMonthlyPass = async (req, res) => {
             return res.redirect(pageRedirectWithMsg("error", "Thanh toan VNPAY that bai hoac bi huy."));
         }
 
-        const pass = await createMonthlyPassAfterPaid(tx);
-        await WalletTransaction.updateOne(
-            { _id: tx._id },
-            {
-                $set: {
-                    status: "SUCCESS",
-                    method: "VNPAY",
-                    relatedMonthlyPassId: pass?._id || null,
-                    paidAt: new Date(),
-                    note: `VNPAY paid txnRef ${tx.txnRef}`,
-                    rawIpn: query
-                }
+        let pass;
+        try {
+            pass = await createMonthlyPassAfterPaid(tx);
+        } catch (activationError) {
+            try {
+                await WalletTransaction.updateOne(
+                    { _id: tx._id, status: "PENDING" },
+                    { $set: { status: "FAILED", note: `Payment confirmed but monthly pass activation failed: ${activationError?.message || 'Unknown error.'}`, rawIpn: query } }
+                );
+            } catch (updateErr) {
+                console.error("Failed to mark VNPAY activation error:", updateErr);
             }
-        );
+            return res.redirect(pageRedirectWithMsg("error", "Thanh toan da duoc ghi nhan nhung kich hoat ve that bai. Vui long lien he ho tro."));
+        }
+        try {
+            await WalletTransaction.updateOne(
+                { _id: tx._id },
+                {
+                    $set: {
+                        status: "SUCCESS",
+                        method: "VNPAY",
+                        relatedMonthlyPassId: pass?._id || null,
+                        paidAt: new Date(),
+                        note: `VNPAY paid txnRef ${tx.txnRef}`,
+                        rawIpn: query
+                    }
+                }
+            );
+        } catch (updateErr) {
+            console.error("Failed to mark VNPAY monthly pass transaction as success:", updateErr);
+        }
 
         return res.redirect(pageRedirectWithMsg("success", "Thanh toan VNPAY thanh cong. Ve thang da duoc kich hoat."));
     } catch (err) {
@@ -1134,20 +1221,38 @@ exports.momoReturnMonthlyPass = async (req, res) => {
             return res.redirect(pageRedirectWithMsg("error", "Thanh toan MoMo that bai hoac bi huy."));
         }
 
-        const pass = await createMonthlyPassAfterPaid(tx);
-        await WalletTransaction.updateOne(
-            { _id: tx._id },
-            {
-                $set: {
-                    status: "SUCCESS",
-                    method: "MOMO",
-                    relatedMonthlyPassId: pass?._id || null,
-                    paidAt: new Date(),
-                    note: `MoMo paid orderId ${orderId}`,
-                    rawIpn: req.query
-                }
+        let pass;
+        try {
+            pass = await createMonthlyPassAfterPaid(tx);
+        } catch (activationError) {
+            try {
+                await WalletTransaction.updateOne(
+                    { _id: tx._id, status: "PENDING" },
+                    { $set: { status: "FAILED", note: `Payment confirmed but monthly pass activation failed: ${activationError?.message || 'Unknown error.'}`, rawIpn: req.query } }
+                );
+            } catch (updateErr) {
+                console.error("Failed to mark MoMo activation error:", updateErr);
             }
-        );
+            return res.redirect(pageRedirectWithMsg("error", "Thanh toan da duoc ghi nhan nhung kich hoat ve that bai. Vui long lien he ho tro."));
+        }
+
+        try {
+            await WalletTransaction.updateOne(
+                { _id: tx._id },
+                {
+                    $set: {
+                        status: "SUCCESS",
+                        method: "MOMO",
+                        relatedMonthlyPassId: pass?._id || null,
+                        paidAt: new Date(),
+                        note: `MoMo paid orderId ${orderId}`,
+                        rawIpn: req.query
+                    }
+                }
+            );
+        } catch (updateErr) {
+            console.error("Failed to mark MoMo monthly pass transaction as success:", updateErr);
+        }
 
         return res.redirect(pageRedirectWithMsg("success", "Thanh toan MoMo thanh cong. Ve thang da duoc kich hoat."));
     } catch (err) {

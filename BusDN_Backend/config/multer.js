@@ -1,22 +1,37 @@
+const crypto = require('crypto');
+const fs = require('fs');
 const multer = require('multer');
 const path = require('path');
 
+const uploadRoot = path.join(__dirname, '../public/uploads');
+const priorityUploadRoot = path.join(uploadRoot, 'priority');
+
+[uploadRoot, priorityUploadRoot].forEach((dir) => {
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+});
+
 // --- AVATAR UPLOAD STORAGE ---
 const avatarStorage = multer.diskStorage({
-    destination: './public/uploads/',
+    destination: uploadRoot,
     filename: (req, file, cb) => {
-        cb(null, 'avatar-' + Date.now() + path.extname(file.originalname));
+        const ext = path.extname(file.originalname).toLowerCase();
+        const uniqueSuffix = crypto.randomUUID().replace(/-/g, '');
+        cb(null, `avatar-${Date.now()}-${uniqueSuffix}${ext}`);
     }
 });
 
 // --- PRIORITY PROFILE UPLOAD STORAGE ---
 const priorityStorage = multer.diskStorage({
-    destination: './public/uploads/priority/',
+    destination: priorityUploadRoot,
     filename: (req, file, cb) => {
         const userId = req.session?.userId || req.user?.userId || req.user?._id || 'unknown';
         const timestamp = Date.now();
-        const ext = path.extname(file.originalname);
-        cb(null, `priority-${userId}-${timestamp}${ext}`);
+        const ext = path.extname(file.originalname).toLowerCase();
+        const fieldName = String(file.fieldname || 'file').toLowerCase();
+        const uniqueSuffix = crypto.randomUUID().replace(/-/g, '');
+        cb(null, `priority-${userId}-${fieldName}-${timestamp}-${uniqueSuffix}${ext}`);
     }
 });
 

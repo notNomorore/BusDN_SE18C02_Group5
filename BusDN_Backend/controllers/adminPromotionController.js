@@ -37,9 +37,39 @@ function toLifecycleStatus(requestedStatus, startAt, endAt, now = new Date()) {
         return requestedStatus;
     }
 
-    if (endAt <= now) return 'ENDED';
+    if (endAt < now) return 'ENDED';
     if (startAt > now) return 'SCHEDULED';
     return 'ACTIVE';
+}
+
+async function syncPromotionLifecycleStatuses(now = new Date()) {
+    const mutableFilter = { status: { $nin: ['DRAFT', 'CANCELLED', 'ENDED'] } };
+
+    await Promise.all([
+        Promotion.updateMany(
+            {
+                ...mutableFilter,
+                endAt: { $lt: now }
+            },
+            { $set: { status: 'ENDED' } }
+        ),
+        Promotion.updateMany(
+            {
+                ...mutableFilter,
+                startAt: { $gt: now },
+                endAt: { $gte: now }
+            },
+            { $set: { status: 'SCHEDULED' } }
+        ),
+        Promotion.updateMany(
+            {
+                ...mutableFilter,
+                startAt: { $lte: now },
+                endAt: { $gte: now }
+            },
+            { $set: { status: 'ACTIVE' } }
+        )
+    ]);
 }
 
 async function validatePayload(payload, mode = 'create') {
@@ -172,6 +202,8 @@ exports.getPromotionsPage = async (req, res) => {
         if (ALLOWED_STATUS.includes(status)) {
             filter.status = status;
         }
+
+        await syncPromotionLifecycleStatuses(new Date());
 
         const [promotions, routes] = await Promise.all([
             Promotion.find(filter)

@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const { User } = require('../models/models');
 const { applyPriorityExpiryForUser } = require('../utils/priorityUtils');
+const { normalizeAvatarPath } = require('../utils/avatar');
 require('dotenv').config();
 // Configure Nodemailer (Placeholder as requested, but functional if credentials provided)
 // For real testing, use Ethereal or a real service.
@@ -143,7 +144,7 @@ exports.login = async (req, res) => {
                 email: user.email,
                 phone: user.phone,
                 role: user.role,
-                avatar: user.avatar,
+                avatar: normalizeAvatarPath(user.avatar),
                 isFirstLogin: !!user.isFirstLogin
             }
         });
@@ -155,7 +156,7 @@ exports.login = async (req, res) => {
 
 exports.forgotPassword = async (req, res) => {
     try {
-        const { email } = req.body;
+        const email = (req.body.email || '').trim().toLowerCase();
         const user = await User.findOne({ email });
 
         if (!user) {
@@ -178,7 +179,8 @@ exports.forgotPassword = async (req, res) => {
 
 exports.resetPassword = async (req, res) => {
     try {
-        const { email, otp, newPassword } = req.body;
+        const email = (req.body.email || '').trim().toLowerCase();
+        const { otp, newPassword } = req.body;
         const user = await User.findOne({ email });
 
         if (!user || user.otp_code !== otp || user.otp_expires < Date.now()) {
@@ -189,6 +191,7 @@ exports.resetPassword = async (req, res) => {
         user.password = await bcrypt.hash(newPassword, salt);
         user.otp_code = undefined;
         user.otp_expires = undefined;
+        user.isFirstLogin = false;
         await user.save();
 
         res.json({ message: 'Password updated' });

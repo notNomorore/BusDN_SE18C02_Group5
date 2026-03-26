@@ -6,8 +6,13 @@
     <title>Mua vé tháng - BusDN</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
     <style>
-        body { background: #f4f6f9; font-family: 'Segoe UI', sans-serif; }
+        body { background: #f4f6f9; font-family: 'Inter', 'Segoe UI', sans-serif; }
+        button, input, select, textarea { font-family: 'Inter', 'Segoe UI', sans-serif; }
+        h1, h2, h3, h4, h5, h6, .display-6, .fw-bold { font-family: 'Plus Jakarta Sans', 'Inter', sans-serif; }
         .page-card { border: 0; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,.04); }
         .feature-card {
             background: linear-gradient(135deg, #0d4f9b 0%, #003f88 100%);
@@ -564,13 +569,13 @@
             if (monthInput) monthInput.addEventListener("change", function () {
                 const changed = normalizePeriodSelection();
                 resetAppliedPromo(true);
-                if (changed) setPromoStatus("Khong the chon thang trong qua khu.", "error");
+                if (changed) setPromoStatus("Không thể chọn tháng trong quá khứ.", "error");
                 updateSummary();
             });
             if (yearInput) yearInput.addEventListener("change", function () {
                 const changed = normalizePeriodSelection();
                 resetAppliedPromo(true);
-                if (changed) setPromoStatus("Khong the chon thang trong qua khu.", "error");
+                if (changed) setPromoStatus("Không thể chọn tháng trong quá khứ.", "error");
                 updateSummary();
             });
             if (promoCodeInput) promoCodeInput.addEventListener("input", function () {
@@ -656,7 +661,7 @@
                     promoCodeInput.value = String(promoCodeInput.value || "").trim().toUpperCase();
                 }
                 if (periodChanged) {
-                    setPromoStatus("Khong the chon thang trong qua khu.", "error");
+                    setPromoStatus("Không thể chọn tháng trong quá khứ.", "error");
                     updateSummary();
                     e.preventDefault();
                     return;

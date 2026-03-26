@@ -14,7 +14,7 @@ const UserSchema = new mongoose.Schema({
             return !this.email;
         }
     },
-    avatar: { type: String, default: '/images/default-avatar.png' },
+    avatar: { type: String, default: '/assets/default-avatar.svg' },
     role: {
         type: String,
         enum: ['PASSENGER', 'DRIVER', 'CONDUCTOR', 'ASSISTANT', 'ADMIN', 'STAFF', 'FINANCE'],

@@ -5,10 +5,11 @@ const { User } = require('../models/models');
 require('dotenv').config();
 module.exports = (app) => {
     // --- PASSPORT GOOGLE STRATEGY ---
+    const backendUrl = (process.env.BACKEND_URL || 'http://localhost:3000').replace(/\/$/, '');
     passport.use(new GoogleStrategy({
         clientID: process.env.GOOGLE_CLIENT_ID || 'YOUR_GOOGLE_CLIENT_ID',
         clientSecret: process.env.GOOGLE_CLIENT_SECRET || 'YOUR_GOOGLE_CLIENT_SECRET',
-        callbackURL: '/auth/google/callback'
+        callbackURL: `${backendUrl}/auth/google/callback`
     }, async (accessToken, refreshToken, profile, done) => {
         try {
             let user = await User.findOne({ email: profile.emails[0].value });

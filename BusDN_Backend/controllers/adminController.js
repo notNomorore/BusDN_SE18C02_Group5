@@ -63,6 +63,28 @@ const buildWelcomeEmailHtml = ({ fullName, username, password, role, loginUrl })
     `;
 };
 
+const buildResetPasswordEmailHtml = ({ fullName, username, password, role, loginUrl }) => {
+    const roleText = role === 'DRIVER' ? 'Tai xe' : role === 'CONDUCTOR' ? 'Phu xe' : role;
+    return `
+        <html>
+            <body style="font-family: Arial, sans-serif; background-color: #f6f8fb; padding: 20px;">
+                <div style="max-width: 620px; margin: 0 auto; background-color: #fff; border-radius: 10px; padding: 24px;">
+                    <h2 style="margin-top: 0; color: #173c7a;">Mat khau BusDN da duoc dat lai</h2>
+                    <p>Xin chao <strong>${fullName}</strong>,</p>
+                    <p>Admin da dat lai mat khau tai khoan nhan vien cua ban.</p>
+                    <div style="background:#f3f6fc; border-left:4px solid #1f5fd2; padding:12px 14px; margin:16px 0;">
+                        <p style="margin:6px 0;"><strong>Vai tro:</strong> ${roleText}</p>
+                        <p style="margin:6px 0;"><strong>Tai khoan dang nhap:</strong> ${username}</p>
+                        <p style="margin:6px 0;"><strong>Mat khau moi tam thoi:</strong> ${password}</p>
+                        <p style="margin:6px 0;"><strong>Dang nhap:</strong> <a href="${loginUrl}">${loginUrl}</a></p>
+                    </div>
+                    <p>Lan dang nhap tiep theo, ban se duoc yeu cau doi mat khau.</p>
+                </div>
+            </body>
+        </html>
+    `;
+};
+
 const createStaffRecord = async ({ fullName, email, phone, role, req }) => {
     const password = generateSecurePassword(10);
     const hashedPassword = await bcrypt.hash(password, await bcrypt.genSalt(10));
@@ -103,6 +125,73 @@ const createStaffRecord = async ({ fullName, email, phone, role, req }) => {
     return accountPayload;
 };
 
+exports.resetStaffPasswordApi = async (req, res) => {
+    try {
+        const adminUser = await User.findById(req.user?.userId).select('role');
+        if (!adminUser || adminUser.role !== 'ADMIN') {
+            return res.status(403).json({ ok: false, message: 'Forbidden' });
+        }
+
+        const { userId } = req.params;
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ ok: false, message: 'Nguoi dung khong ton tai' });
+        }
+        if (user.role === 'ADMIN') {
+            return res.status(403).json({ ok: false, message: 'Khong the dat lai mat khau Admin' });
+        }
+
+        const password = generateSecurePassword(10);
+        const hashedPassword = await bcrypt.hash(password, await bcrypt.genSalt(10));
+
+        user.password = hashedPassword;
+        user.isFirstLogin = true;
+        await user.save();
+
+        const username = user.email || user.phone || '';
+        const accountPayload = {
+            fullName: user.fullName,
+            email: user.email || '',
+            phone: user.phone || '',
+            role: user.role,
+            username,
+            password
+        };
+
+        if (user.email) {
+            const loginUrl = buildLoginUrl(req);
+            await sendEmail(
+                user.email,
+                'Mat khau BusDN da duoc dat lai',
+                buildResetPasswordEmailHtml({
+                    fullName: user.fullName,
+                    username,
+                    password,
+                    role: user.role,
+                    loginUrl
+                })
+            );
+
+            return res.json({
+                ok: true,
+                emailSent: true,
+                message: 'Mat khau moi da duoc gui qua email.',
+                account: accountPayload
+            });
+        }
+
+        return res.json({
+            ok: true,
+            emailSent: false,
+            message: 'Mat khau moi da duoc tao.',
+            account: accountPayload
+        });
+    } catch (error) {
+        console.error('Error resetting staff password:', error);
+        return res.status(500).json({ ok: false, message: 'Loi he thong khi dat lai mat khau' });
+    }
+};
+
 const getImportRows = (fileBuffer) => {
     const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
     const firstSheetName = workbook.SheetNames[0];
@@ -117,6 +206,73 @@ const parseImportRow = (rawRow) => {
     const phone = normalizePhone(rawRow.phone);
     const role = normalizeRole(rawRow.role);
     return { fullName, email, phone, role };
+};
+
+const processStaffImportRows = async ({ req, rows }) => {
+    const existingUsers = await User.find({
+        $or: [{ email: { $ne: null } }, { phone: { $ne: null } }]
+    }).select('email phone');
+
+    const existingEmails = new Set(existingUsers.map((u) => normalizeEmail(u.email)).filter(Boolean));
+    const existingPhones = new Set(existingUsers.map((u) => normalizePhone(u.phone)).filter(Boolean));
+    const pendingEmails = new Set();
+    const pendingPhones = new Set();
+
+    let imported = 0;
+    let failed = 0;
+    const failures = [];
+    const phoneOnlyAccounts = [];
+
+    for (let i = 0; i < rows.length; i += 1) {
+        const rowIndex = i + 2;
+        const { fullName, email, phone, role } = parseImportRow(rows[i]);
+
+        if (!fullName || !role || (!email && !phone)) {
+            failed += 1;
+            failures.push(`Dong ${rowIndex}: thieu fullName/role/email-phone.`);
+            continue;
+        }
+
+        if (!STAFF_ROLES.includes(role)) {
+            failed += 1;
+            failures.push(`Dong ${rowIndex}: role khong hop le (${role}).`);
+            continue;
+        }
+
+        if (email && (existingEmails.has(email) || pendingEmails.has(email))) {
+            failed += 1;
+            failures.push(`Dong ${rowIndex}: email bi trung (${email}).`);
+            continue;
+        }
+
+        if (phone && (existingPhones.has(phone) || pendingPhones.has(phone))) {
+            failed += 1;
+            failures.push(`Dong ${rowIndex}: phone bi trung (${phone}).`);
+            continue;
+        }
+
+        try {
+            const accountPayload = await createStaffRecord({ fullName, email, phone, role, req });
+            imported += 1;
+
+            if (email) pendingEmails.add(email);
+            if (phone) pendingPhones.add(phone);
+
+            if (!email) {
+                phoneOnlyAccounts.push(accountPayload);
+            }
+        } catch (error) {
+            failed += 1;
+            failures.push(`Dong ${rowIndex}: ${error.message || 'tao tai khoan that bai'}`);
+        }
+    }
+
+    return {
+        imported,
+        failed,
+        failures,
+        phoneOnlyAccounts
+    };
 };
 
 // --- 0. GET STAFF LIST (VIEW)
@@ -263,63 +419,7 @@ exports.importStaff = async (req, res) => {
             return res.redirect('/admin/staff?error=' + encodeURIComponent('File khong co du lieu hop le.'));
         }
 
-        const existingUsers = await User.find({
-            $or: [{ email: { $ne: null } }, { phone: { $ne: null } }]
-        }).select('email phone');
-
-        const existingEmails = new Set(existingUsers.map((u) => normalizeEmail(u.email)).filter(Boolean));
-        const existingPhones = new Set(existingUsers.map((u) => normalizePhone(u.phone)).filter(Boolean));
-        const pendingEmails = new Set();
-        const pendingPhones = new Set();
-
-        let imported = 0;
-        let failed = 0;
-        const failures = [];
-        const phoneOnlyAccounts = [];
-
-        for (let i = 0; i < rows.length; i += 1) {
-            const rowIndex = i + 2;
-            const { fullName, email, phone, role } = parseImportRow(rows[i]);
-
-            if (!fullName || !role || (!email && !phone)) {
-                failed += 1;
-                failures.push(`Dong ${rowIndex}: thieu fullName/role/email-phone.`);
-                continue;
-            }
-
-            if (!STAFF_ROLES.includes(role)) {
-                failed += 1;
-                failures.push(`Dong ${rowIndex}: role khong hop le (${role}).`);
-                continue;
-            }
-
-            if (email && (existingEmails.has(email) || pendingEmails.has(email))) {
-                failed += 1;
-                failures.push(`Dong ${rowIndex}: email bi trung (${email}).`);
-                continue;
-            }
-
-            if (phone && (existingPhones.has(phone) || pendingPhones.has(phone))) {
-                failed += 1;
-                failures.push(`Dong ${rowIndex}: phone bi trung (${phone}).`);
-                continue;
-            }
-
-            try {
-                const accountPayload = await createStaffRecord({ fullName, email, phone, role, req });
-                imported += 1;
-
-                if (email) pendingEmails.add(email);
-                if (phone) pendingPhones.add(phone);
-
-                if (!email) {
-                    phoneOnlyAccounts.push(accountPayload);
-                }
-            } catch (error) {
-                failed += 1;
-                failures.push(`Dong ${rowIndex}: ${error.message || 'tao tai khoan that bai'}`);
-            }
-        }
+        const { imported, failed, failures, phoneOnlyAccounts } = await processStaffImportRows({ req, rows });
 
         req.session.staffOnboardingInfo = {
             source: 'bulk',
@@ -336,6 +436,41 @@ exports.importStaff = async (req, res) => {
     } catch (error) {
         console.error('Error importing staff:', error);
         return res.redirect('/admin/staff?error=' + encodeURIComponent('Import that bai: ' + (error.message || 'Loi he thong')));
+    }
+};
+
+exports.importStaffApi = async (req, res) => {
+    try {
+        const adminUser = await User.findById(req.user?.userId).select('role');
+        if (!adminUser || adminUser.role !== 'ADMIN') {
+            return res.status(403).json({ ok: false, message: 'Forbidden' });
+        }
+
+        if (!req.file || !req.file.buffer) {
+            return res.status(400).json({ ok: false, message: 'Vui lòng tải lên file Excel/CSV.' });
+        }
+
+        const rows = getImportRows(req.file.buffer);
+        if (!rows.length) {
+            return res.status(400).json({ ok: false, message: 'File không có dữ liệu hợp lệ.' });
+        }
+
+        const { imported, failed, failures, phoneOnlyAccounts } = await processStaffImportRows({ req, rows });
+
+        return res.json({
+            ok: true,
+            imported,
+            failed,
+            failures,
+            phoneOnlyAccounts,
+            message: `Imported ${imported}, Failed ${failed}`
+        });
+    } catch (error) {
+        console.error('Error importing staff via API:', error);
+        return res.status(500).json({
+            ok: false,
+            message: 'Import thất bại: ' + (error.message || 'Lỗi hệ thống')
+        });
     }
 };
 

@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
+const fs = require('fs');
 const path = require('path');
 const session = require('express-session');
 const passport = require('passport');
@@ -9,12 +10,14 @@ const jwt = require('jsonwebtoken');
 const connectDB = require('./config/connectdb');
 const models = require("./models/models");
 const { Route, Schedule, User } = models;
+const { normalizeAvatarPath } = require('./utils/avatar');
 // --- 1. IMPORT CONFIGURATIONS ---
 const configViewEngine = require('./config/viewEngine');
 const configPassport = require('./config/passport');
 const { upload, priorityProfileUpload } = require('./config/multer');
 const { setIO } = require('./config/socket');
 const { enforcePriorityExpiry } = require('./middleware/priorityEnforcement');
+const { applyPriorityExpiryForUser } = require('./utils/priorityUtils');
 
 // --- 2. SETUP EXPRESS APP ---
 const app = express();
@@ -25,6 +28,76 @@ const io = new Server(server, {
     }
 });
 setIO(io);
+
+const GOOGLE_AUTH_SOURCE = 'busdn-google-auth';
+const getRoleRedirectPath = (role) => {
+    if (role === 'ADMIN' || role === 'STAFF') return '/admin/dashboard';
+    if (role === 'DRIVER') return '/driver/schedule';
+    if (role === 'CONDUCTOR') return '/conductor/schedule';
+    return '/';
+};
+
+const buildGoogleAuthPopupHtml = (payload) => {
+    const serializedPayload = JSON.stringify(payload).replace(/</g, '\\u003c');
+
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BusDN Google Authentication</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: grid;
+      place-items: center;
+      min-height: 100vh;
+      margin: 0;
+      background: #f6fffb;
+      color: #0f172a;
+    }
+    .card {
+      max-width: 360px;
+      padding: 24px;
+      text-align: center;
+      border: 1px solid #d1fae5;
+      border-radius: 16px;
+      background: #fff;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+    }
+    .title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+    .text { font-size: 14px; color: #475569; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="title">BusDN</div>
+    <div class="text">Đang hoàn tất đăng nhập Google. Bạn có thể đóng cửa sổ này nếu không tự động quay lại.</div>
+  </div>
+  <script>
+    (function () {
+      var payload = ${serializedPayload};
+      try {
+        if (window.opener && !window.opener.closed) {
+          window.opener.postMessage(payload, '*');
+        }
+      } catch (error) {
+        console.error(error);
+      }
+      setTimeout(function () {
+        window.close();
+      }, 100);
+    })();
+  </script>
+</body>
+</html>`;
+};
+
+const sendGoogleAuthPopup = (res, payload) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    return res.status(200).send(buildGoogleAuthPopupHtml(payload));
+};
 
 // --- 3. DATABASE CONNECTION ---
 connectDB(); 
@@ -90,6 +163,80 @@ app.use(async (req, res, next) => {
 
 app.use(enforcePriorityExpiry);
 
+const uploadsRoot = path.join(__dirname, 'public', 'uploads');
+const priorityUploadsRoot = path.join(uploadsRoot, 'priority');
+const resolvedUploadsRoot = path.resolve(uploadsRoot);
+
+[uploadsRoot, priorityUploadsRoot].forEach((dir) => {
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+});
+
+const resolveFallbackPriorityUpload = (requestedPath) => {
+    const normalized = String(requestedPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!normalized.startsWith('priority/')) {
+        return null;
+    }
+
+    const fileName = path.posix.basename(normalized);
+    const match = fileName.match(/^priority-([^/]+)-(\d+)-[^.]+\.[^.]+$/i) || fileName.match(/^priority-([^/]+)-(\d+)\.[^.]+$/i);
+    if (!match) {
+        return null;
+    }
+
+    const userId = match[1];
+    const requestedExt = path.extname(fileName).toLowerCase();
+    const prefix = `priority-${userId}-`;
+
+    let candidates = [];
+    try {
+        candidates = fs.readdirSync(priorityUploadsRoot)
+            .filter((name) => name.startsWith(prefix))
+            .map((name) => {
+                const fullPath = path.join(priorityUploadsRoot, name);
+                const stat = fs.statSync(fullPath);
+                return {
+                    name,
+                    fullPath,
+                    ext: path.extname(name).toLowerCase(),
+                    mtime: stat.mtimeMs
+                };
+            });
+    } catch (error) {
+        return null;
+    }
+
+    if (!candidates.length) {
+        return null;
+    }
+
+    const sameExt = candidates.filter((item) => item.ext === requestedExt);
+    const pool = sameExt.length ? sameExt : candidates;
+
+    return pool
+        .sort((a, b) => b.mtime - a.mtime || a.name.localeCompare(b.name))
+        .at(0)?.fullPath || null;
+};
+
+app.use('/uploads', (req, res, next) => {
+    const requestedPath = decodeURIComponent(req.path || '');
+    const normalizedPath = requestedPath.replace(/^\/+/, '');
+    const candidatePath = path.resolve(uploadsRoot, normalizedPath);
+
+    if ((candidatePath === resolvedUploadsRoot || candidatePath.startsWith(`${resolvedUploadsRoot}${path.sep}`)) && fs.existsSync(candidatePath)) {
+        return res.sendFile(candidatePath);
+    }
+
+    const fallbackPath = resolveFallbackPriorityUpload(normalizedPath);
+    if (fallbackPath) {
+        console.warn(`Priority upload fallback used for ${normalizedPath} -> ${path.basename(fallbackPath)}`);
+        return res.sendFile(fallbackPath);
+    }
+
+    return next();
+});
+
 app.use(async (req, res, next) => {
     try {
         if (!req.session || !req.session.userId) return next();
@@ -148,17 +295,70 @@ app.use('/passenger', passengerRoutes);
 
 // --- 6. GOOGLE AUTH ROUTES (Giữ logic redirect chuẩn) ---
 app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
-app.get('/auth/google/callback',
-    passport.authenticate('google', { failureRedirect: '/login' }),
-    async (req, res) => {
-        if (req.user) {
-            req.session.userId = req.user._id;
-            req.session.role = req.user.role;
-            return res.redirect('/home');
+app.get('/auth/google/callback', (req, res, next) => {
+    passport.authenticate('google', { session: false }, async (err, user, info) => {
+        try {
+            if (err || !user) {
+                return sendGoogleAuthPopup(res, {
+                    source: GOOGLE_AUTH_SOURCE,
+                    status: 'error',
+                    error: info?.message || err?.message || 'Google authentication failed.'
+                });
+            }
+
+            if (user.isLocked || user.status === 'LOCKED') {
+                return sendGoogleAuthPopup(res, {
+                    source: GOOGLE_AUTH_SOURCE,
+                    status: 'error',
+                    error: 'Tài khoản của bạn đã bị khóa.'
+                });
+            }
+
+            if (!user.isVerified) {
+                return sendGoogleAuthPopup(res, {
+                    source: GOOGLE_AUTH_SOURCE,
+                    status: 'error',
+                    error: 'Tài khoản chưa được xác thực.'
+                });
+            }
+
+            await applyPriorityExpiryForUser(user._id);
+
+            req.session.userId = user._id;
+            req.session.role = user.role;
+
+            const token = jwt.sign(
+                { userId: user._id, role: user.role },
+                process.env.JWT_SECRET || 'secret_key',
+                { expiresIn: '7d' }
+            );
+
+            return sendGoogleAuthPopup(res, {
+                source: GOOGLE_AUTH_SOURCE,
+                status: 'success',
+                token,
+                user: {
+                    id: String(user._id),
+                    fullName: user.fullName,
+                    email: user.email,
+                    phone: user.phone,
+                    role: user.role,
+                    avatar: normalizeAvatarPath(user.avatar),
+                    isFirstLogin: !!user.isFirstLogin,
+                    status: user.status || null
+                },
+                redirectTo: getRoleRedirectPath(user.role)
+            });
+        } catch (error) {
+            console.error('Google auth callback error:', error);
+            return sendGoogleAuthPopup(res, {
+                source: GOOGLE_AUTH_SOURCE,
+                status: 'error',
+                error: 'Google authentication failed.'
+            });
         }
-        return res.redirect('/login');
-    }
-);
+    })(req, res, next);
+});
 // --- 7. ROOT ROUTE ---
 app.get('/', (req, res) => {
     return res.render('home', { user: res.locals.user || null });

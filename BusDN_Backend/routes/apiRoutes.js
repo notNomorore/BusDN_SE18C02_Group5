@@ -1,6 +1,7 @@
 ﻿const express = require('express');
 const router = express.Router();
 const authMiddleware = require('../middleware/authMiddleware');
+const multer = require('multer');
 const { User, Route, Stop, PriorityProfile, MonthlyPass, WalletTransaction, Schedule, Bus, LostFound, Notification, Feedback, TripTicket, Promotion } = require('../models/models');
 const { priorityProfileUpload } = require('../config/multer');
 const bcrypt = require('bcryptjs');
@@ -10,7 +11,10 @@ const QRCode = require('qrcode');
 const querystring = require('querystring');
 const { emitPendingPriorityCount, applyPriorityExpiryForUser } = require('../utils/priorityUtils');
 const scheduleController = require('../controllers/scheduleController'); // NEW
+const adminController = require('../controllers/adminController');
 const { getIO } = require('../config/socket');
+const { normalizeAvatarPath } = require('../utils/avatar');
+const importUpload = multer({ storage: multer.memoryStorage() });
 const {
     getFareMatrix,
     getPriorityDiscountPercentByCategory,
@@ -40,6 +44,7 @@ const PASS_TYPE = {
 
 const normalizePromoCode = (value) => String(value || '').trim().toUpperCase();
 const cleanText = (value) => (typeof value === 'string' ? value.trim() : '');
+const escapeRegExp = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const PAYMENT_METHOD = {
     VNPAY: 'VNPAY',
     MOMO: 'MOMO'
@@ -147,6 +152,7 @@ const ensureAdminApi = async (req, res) => {
 const ALLOWED_PROMOTION_STATUS = ['DRAFT', 'SCHEDULED', 'ACTIVE', 'ENDED', 'CANCELLED'];
 const ALLOWED_PROMOTION_SCOPE = ['ALL', 'SINGLE_ROUTE', 'INTER_ROUTE'];
 const ALLOWED_PROMOTION_DISCOUNT_TYPE = ['PERCENT', 'FIXED'];
+const PROMO_RESERVATION_TTL_MINUTES = 20;
 
 const parseApiDateTime = (value) => {
     const raw = cleanText(value);
@@ -165,9 +171,39 @@ const toPromotionLifecycleStatus = (requestedStatus, startAt, endAt, now = new D
     if (requestedStatus === 'DRAFT' || requestedStatus === 'CANCELLED' || requestedStatus === 'ENDED') {
         return requestedStatus;
     }
-    if (endAt <= now) return 'ENDED';
+    if (endAt < now) return 'ENDED';
     if (startAt > now) return 'SCHEDULED';
     return 'ACTIVE';
+};
+
+const syncPromotionLifecycleStatuses = async (now = new Date()) => {
+    const mutableFilter = { status: { $nin: ['DRAFT', 'CANCELLED', 'ENDED'] } };
+
+    await Promise.all([
+        Promotion.updateMany(
+            {
+                ...mutableFilter,
+                endAt: { $lt: now }
+            },
+            { $set: { status: 'ENDED' } }
+        ),
+        Promotion.updateMany(
+            {
+                ...mutableFilter,
+                startAt: { $gt: now },
+                endAt: { $gte: now }
+            },
+            { $set: { status: 'SCHEDULED' } }
+        ),
+        Promotion.updateMany(
+            {
+                ...mutableFilter,
+                startAt: { $lte: now },
+                endAt: { $gte: now }
+            },
+            { $set: { status: 'ACTIVE' } }
+        )
+    ]);
 };
 
 const mapPromotionPayloadFromApi = (body = {}) => {
@@ -287,7 +323,9 @@ const getVnpayBaseConfig = (req) => ({
     tmnCode: process.env.VNPAY_TMN_CODE || '',
     hashSecret: process.env.VNPAY_HASH_SECRET || '',
     vnpUrl: process.env.VNPAY_URL || 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
-    returnUrl: process.env.VNPAY_MONTHLY_RETURN_URL || `${buildBaseUrl(req)}/api/user/passes/monthly/vnpay-return`
+    returnUrl: process.env.VNPAY_MONTHLY_RETURN_URL
+        || process.env.VNPAY_RETURN_URL
+        || `${buildBaseUrl(req)}/api/user/passes/monthly/vnpay-return`
 });
 
 const signMomoRaw = (rawSignature, accessKey, secretKey) => crypto.createHmac('sha256', secretKey).update(rawSignature).digest('hex');
@@ -393,6 +431,120 @@ const buildMonthlyPassResultRedirectFromTransaction = (tx, type, message, passId
         amount: Number(tx?.amount || 0),
         passId: passId || tx?.relatedMonthlyPassId || ''
     });
+};
+
+const releasePromotionUsageSlot = async (promotionId) => {
+    if (!promotionId) return;
+
+    await Promotion.updateOne(
+        { _id: promotionId, usageCount: { $gt: 0 } },
+        { $inc: { usageCount: -1 } }
+    );
+};
+
+const markPromotionReservationReleasedForTransaction = async (txId) => {
+    if (!txId) return false;
+
+    const tx = await WalletTransaction.findOneAndUpdate(
+        {
+            _id: txId,
+            'rawReturn.promoReserved': true,
+            'rawReturn.promotionId': { $exists: true, $ne: '' },
+            'rawReturn.promoConsumed': { $ne: true },
+            'rawReturn.promoReleased': { $ne: true }
+        },
+        {
+            $set: {
+                'rawReturn.promoReleased': true
+            }
+        },
+        { new: false }
+    ).lean();
+
+    if (!tx?.rawReturn?.promotionId) {
+        return false;
+    }
+
+    await releasePromotionUsageSlot(cleanText(tx.rawReturn.promotionId));
+    return true;
+};
+
+const markPromotionReservationConsumedForTransaction = async (txId) => {
+    if (!txId) return false;
+
+    const result = await WalletTransaction.updateOne(
+        {
+            _id: txId,
+            'rawReturn.promoReserved': true,
+            'rawReturn.promotionId': { $exists: true, $ne: '' },
+            'rawReturn.promoConsumed': { $ne: true },
+            'rawReturn.promoReleased': { $ne: true }
+        },
+        {
+            $set: {
+                'rawReturn.promoConsumed': true
+            }
+        }
+    );
+
+    return result.modifiedCount > 0;
+};
+
+const releaseExpiredPromotionReservations = async (now = new Date()) => {
+    const cutoff = new Date(now.getTime() - (PROMO_RESERVATION_TTL_MINUTES * 60 * 1000));
+    const expiredTxs = await WalletTransaction.find({
+        txnType: 'MONTHLY_PASS',
+        status: 'PENDING',
+        createdAt: { $lte: cutoff },
+        'rawReturn.promoReserved': true,
+        'rawReturn.promotionId': { $exists: true, $ne: '' },
+        'rawReturn.promoConsumed': { $ne: true },
+        'rawReturn.promoReleased': { $ne: true }
+    })
+        .select('_id')
+        .lean();
+
+    for (const tx of expiredTxs) {
+        const updated = await WalletTransaction.updateOne(
+            {
+                _id: tx._id,
+                status: 'PENDING'
+            },
+            {
+                $set: {
+                    status: 'CANCELLED',
+                    note: `Payment session expired after ${PROMO_RESERVATION_TTL_MINUTES} minutes.`
+                }
+            }
+        );
+
+        if (updated.modifiedCount > 0) {
+            await markPromotionReservationReleasedForTransaction(tx._id);
+        }
+    }
+};
+
+const finalizePromotionUsageAfterSuccessfulPayment = async (tx) => {
+    const promoId = cleanText(tx?.rawReturn?.promotionId);
+    if (!promoId || tx?.rawReturn?.promoConsumed) return;
+
+    if (tx?.rawReturn?.promoReserved) {
+        await markPromotionReservationConsumedForTransaction(tx._id);
+        return;
+    }
+
+    await consumePromotionUsage(promoId);
+    await WalletTransaction.updateOne(
+        {
+            _id: tx._id,
+            'rawReturn.promoConsumed': { $ne: true }
+        },
+        {
+            $set: {
+                'rawReturn.promoConsumed': true
+            }
+        }
+    );
 };
 
 const markMonthlyPassTransactionFailed = async (tx, status, note, rawIpn = null, extraSet = {}) => {
@@ -599,15 +751,22 @@ const mapPriorityProfileForApi = (user, profile) => {
     const userPriority = user?.priorityProfile || {};
 
     return {
-        type: String(profile?.category || userPriority.type || '').trim(),
-        cardNumber: String(profile?.idNumber || userPriority.cardNumber || '').trim(),
-        cardImageFront: String(profile?.idCardImageFront || userPriority.cardImageFront || '').trim(),
-        cardImageBack: String(profile?.idCardImageBack || userPriority.cardImageBack || '').trim(),
-        proofImage: String(profile?.proofImage || userPriority.proofImage || '').trim(),
+        type: String(userPriority.type || profile?.category || '').trim(),
+        cardNumber: String(userPriority.cardNumber || profile?.idNumber || '').trim(),
+        cardImageFront: String(userPriority.cardImageFront || profile?.idCardImageFront || '').trim(),
+        cardImageBack: String(userPriority.cardImageBack || profile?.idCardImageBack || '').trim(),
+        proofImage: String(userPriority.proofImage || profile?.proofImage || '').trim(),
         rejectionReason: String(profile?.rejectionReason || userPriority.rejectionReason || '').trim(),
-        expiryDate: profile?.expiryDate || userPriority.expiryDate || null,
-        status: normalizePriorityProfileStatus(profile?.status || userPriority.status || user?.priorityStatus || 'NONE')
+        expiryDate: userPriority.expiryDate || profile?.expiryDate || null,
+        status: normalizePriorityProfileStatus(user?.priorityStatus || userPriority.status || profile?.status || 'NONE')
     };
+};
+
+const getLatestPriorityProfileForUser = async (userId) => {
+    if (!userId) return null;
+    return PriorityProfile.findOne({ userId })
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .lean();
 };
 
 const resolvePriorityFilePath = (files, fieldName, fallbackValue = '') => {
@@ -630,18 +789,20 @@ const validatePromotionForMonthlyPass = async ({
         return { promotion: null, discountAmount: 0 };
     }
 
+    await syncPromotionLifecycleStatuses(now);
+
     const promotion = await Promotion.findOne({ code: promoCode }).lean();
-    if (!promotion) throw new Error('MÃ£ giáº£m giÃ¡ khÃ´ng tá»“n táº¡i.');
-    if (promotion.status !== 'ACTIVE') throw new Error('MÃ£ giáº£m giÃ¡ chÆ°a hoáº·c khÃ´ng cÃ²n hoáº¡t Ä‘á»™ng.');
+    if (!promotion) throw new Error('Mã giảm giá không tồn tại.');
+    if (promotion.status !== 'ACTIVE') throw new Error('Mã giảm giá chưa hoặc không còn hoạt động.');
 
     const startAt = promotion.startAt ? new Date(promotion.startAt) : null;
     const endAt = promotion.endAt ? new Date(promotion.endAt) : null;
     if (!startAt || !endAt || now < startAt || now > endAt) {
-        throw new Error('MÃ£ giáº£m giÃ¡ Ä‘Ã£ háº¿t háº¡n hoáº·c chÆ°a Ä‘áº¿n thá»i gian Ã¡p dá»¥ng.');
+        throw new Error('Mã giảm giá đã hết hạn hoặc chưa đến thời gian áp dụng.');
     }
 
     if (promotion.minOrderValue && baseForPromo < Number(promotion.minOrderValue)) {
-        throw new Error(`ÄÆ¡n hÃ ng chÆ°a Ä‘áº¡t giÃ¡ trá»‹ tá»‘i thiá»ƒu ${Number(promotion.minOrderValue).toLocaleString('vi-VN')} Ä‘.`);
+        throw new Error(`Đơn hàng chưa đạt giá trị tối thiểu ${Number(promotion.minOrderValue).toLocaleString('vi-VN')} đ.`);
     }
 
     if (promotion.applyScope === 'INTER_ROUTE' && passType !== PASS_TYPE.INTER_ROUTE) {
@@ -661,31 +822,84 @@ const validatePromotionForMonthlyPass = async ({
         const usedByUser = await WalletTransaction.countDocuments({
             userId,
             txnType: 'MONTHLY_PASS',
-            status: 'SUCCESS',
+            status: { $in: ['PENDING', 'SUCCESS'] },
             'rawReturn.promotionId': String(promotion._id)
         });
         if (usedByUser >= Number(promotion.usageLimitPerUser)) {
-            throw new Error('Báº¡n Ä‘Ã£ dÃ¹ng háº¿t lÆ°á»£t cá»§a mÃ£ giáº£m giÃ¡ nÃ y.');
+            throw new Error('Bạn đã dùng hết lượt của mã giảm giá này.');
         }
     }
 
     if (promotion.usageLimitTotal && Number(promotion.usageCount || 0) >= Number(promotion.usageLimitTotal)) {
-        throw new Error('MÃ£ giáº£m giÃ¡ Ä‘Ã£ háº¿t lÆ°á»£t sá»­ dá»¥ng.');
+        throw new Error('Mã giảm giá đã hết lượt sử dụng.');
     }
 
     const discountAmount = calcPromotionDiscount(baseForPromo, promotion);
     if (discountAmount <= 0) {
-        throw new Error('MÃ£ giáº£m giÃ¡ khÃ´ng Ã¡p dá»¥ng cho Ä‘Æ¡n hÃ ng hiá»‡n táº¡i.');
+        throw new Error('Mã giảm giá không áp dụng cho đơn hàng hiện tại.');
     }
 
     return { promotion, discountAmount };
 };
 
+const reservePromotionForMonthlyPass = async ({
+    promoCode,
+    userId,
+    passType,
+    routeId,
+    baseForPromo,
+    now
+}) => {
+    const validated = await validatePromotionForMonthlyPass({
+        promoCode,
+        userId,
+        passType,
+        routeId,
+        baseForPromo,
+        now
+    });
+
+    if (!validated.promotion) {
+        return validated;
+    }
+
+    const reserveFilter = {
+        _id: validated.promotion._id,
+        status: 'ACTIVE',
+        startAt: { $lte: now },
+        endAt: { $gte: now }
+    };
+
+    if (validated.promotion.usageLimitTotal) {
+        reserveFilter.usageCount = { $lt: Number(validated.promotion.usageLimitTotal) };
+    }
+
+    const reservedPromotion = await Promotion.findOneAndUpdate(
+        reserveFilter,
+        { $inc: { usageCount: 1 } },
+        { new: true }
+    ).lean();
+
+    if (!reservedPromotion) {
+        throw new Error('Mã giảm giá đã hết lượt sử dụng.');
+    }
+
+    const discountAmount = calcPromotionDiscount(baseForPromo, reservedPromotion);
+    if (discountAmount <= 0) {
+        await releasePromotionUsageSlot(reservedPromotion._id);
+        throw new Error('Mã giảm giá không áp dụng cho đơn hàng hiện tại.');
+    }
+
+    return { promotion: reservedPromotion, discountAmount };
+};
+
 const consumePromotionUsage = async (promotionId) => {
     if (!promotionId) return;
 
+    await syncPromotionLifecycleStatuses(new Date());
+
     const promotion = await Promotion.findById(promotionId).lean();
-    if (!promotion) throw new Error('MÃ£ giáº£m giÃ¡ khÃ´ng tá»“n táº¡i.');
+    if (!promotion) throw new Error('Mã giảm giá không tồn tại.');
 
     const filter = { _id: promotionId, status: 'ACTIVE' };
     if (promotion.usageLimitTotal) {
@@ -699,7 +913,168 @@ const consumePromotionUsage = async (promotionId) => {
     ).lean();
 
     if (!updated) {
-        throw new Error('MÃ£ giáº£m giÃ¡ Ä‘Ã£ háº¿t lÆ°á»£t sá»­ dá»¥ng.');
+        throw new Error('Mã giảm giá đã hết lượt sử dụng.');
+    }
+};
+
+const buildPromotionUsageHistoryFilter = async ({
+    promotionId = '',
+    q = '',
+    status = 'SUCCESS'
+}) => {
+    const filter = {
+        txnType: 'MONTHLY_PASS'
+    };
+    const conditions = [
+        {
+            $or: [
+                { 'rawReturn.promotionId': { $exists: true, $ne: '' } },
+                { 'rawReturn.promoCode': { $exists: true, $ne: '' } }
+            ]
+        }
+    ];
+
+    const normalizedPromotionId = cleanText(promotionId);
+    if (normalizedPromotionId) {
+        if (!mongoose.Types.ObjectId.isValid(normalizedPromotionId)) {
+            const error = new Error('Mã khuyến mãi không hợp lệ.');
+            error.statusCode = 400;
+            throw error;
+        }
+        const promotion = await Promotion.findById(normalizedPromotionId).select('code').lean();
+        const normalizedPromotionCode = normalizePromoCode(promotion?.code || '');
+        conditions.push({
+            $or: [
+                { 'rawReturn.promotionId': normalizedPromotionId },
+                ...(normalizedPromotionCode ? [{ 'rawReturn.promoCode': normalizedPromotionCode }] : [])
+            ]
+        });
+    }
+
+    const normalizedStatus = cleanText(status).toUpperCase();
+    if (!normalizedStatus || normalizedStatus === 'SUCCESS') {
+        filter.status = 'SUCCESS';
+    } else if (normalizedStatus !== 'ALL') {
+        const allowedStatus = ['PENDING', 'SUCCESS', 'FAILED', 'CANCELLED'];
+        if (allowedStatus.includes(normalizedStatus)) {
+            filter.status = normalizedStatus;
+        } else {
+            filter.status = 'SUCCESS';
+        }
+    }
+
+    const keyword = cleanText(q);
+    if (keyword) {
+        const regex = new RegExp(escapeRegExp(keyword), 'i');
+        const matchedUserIds = await User.distinct('_id', {
+            $or: [
+                { fullName: regex },
+                { email: regex },
+                { phone: regex }
+            ]
+        });
+        const matchedPassIds = await MonthlyPass.distinct('_id', {
+            $or: [
+                { passCode: regex },
+                { 'routeSnapshot.routeNumber': regex },
+                { 'routeSnapshot.name': regex }
+            ]
+        });
+
+        const keywordOr = [
+            { txnRef: regex },
+            { note: regex },
+            { 'rawReturn.promoCode': regex },
+            { 'rawReturn.orderCode': regex }
+        ];
+
+        if (matchedUserIds.length > 0) {
+            keywordOr.push({ userId: { $in: matchedUserIds } });
+        }
+
+        if (matchedPassIds.length > 0) {
+            keywordOr.push({ relatedMonthlyPassId: { $in: matchedPassIds } });
+        }
+
+        conditions.push({ $or: keywordOr });
+    }
+
+    if (conditions.length) {
+        filter.$and = conditions;
+    }
+
+    return filter;
+};
+
+const sendPromotionUsageHistory = async (req, res, promotionId = '') => {
+    try {
+        const adminUser = await ensureAdminApi(req, res);
+        if (!adminUser) return;
+
+        const page = Math.max(parsePositiveInt(req.query.page) || 1, 1);
+        const limit = Math.min(Math.max(parsePositiveInt(req.query.limit) || 10, 1), 50);
+        const filter = await buildPromotionUsageHistoryFilter({
+            promotionId,
+            q: req.query.q,
+            status: req.query.status
+        });
+
+        const total = await WalletTransaction.countDocuments(filter);
+        const totalPages = Math.max(1, Math.ceil(total / limit));
+        const currentPage = Math.min(page, totalPages);
+        const skip = (currentPage - 1) * limit;
+
+        const history = await WalletTransaction.find(filter)
+            .populate('userId', 'fullName email phone avatar')
+            .populate('relatedMonthlyPassId', 'passCode month year passType routeSnapshot')
+            .sort({ createdAt: -1, _id: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean();
+
+        return res.json({
+            ok: true,
+            history: history.map((tx) => ({
+                _id: tx._id,
+                txnRef: tx.txnRef,
+                amount: tx.amount,
+                originalAmount: tx.originalAmount,
+                discountAmount: tx.discountAmount,
+                direction: tx.direction,
+                txnType: tx.txnType,
+                method: tx.method,
+                status: tx.status,
+                note: tx.note,
+                paidAt: tx.paidAt,
+                createdAt: tx.createdAt,
+                rawReturn: tx.rawReturn || {},
+                user: tx.userId ? {
+                    _id: tx.userId._id,
+                    fullName: tx.userId.fullName,
+                    email: tx.userId.email,
+                    phone: tx.userId.phone,
+                    avatar: normalizeAvatarPath(tx.userId.avatar)
+                } : null,
+                monthlyPass: tx.relatedMonthlyPassId ? {
+                    _id: tx.relatedMonthlyPassId._id,
+                    passCode: tx.relatedMonthlyPassId.passCode,
+                    month: tx.relatedMonthlyPassId.month,
+                    year: tx.relatedMonthlyPassId.year,
+                    passType: tx.relatedMonthlyPassId.passType,
+                    routeSnapshot: tx.relatedMonthlyPassId.routeSnapshot || {}
+                } : null
+            })),
+            total,
+            totalPages,
+            page: currentPage,
+            limit
+        });
+    } catch (err) {
+        if (err?.statusCode === 400) {
+            return res.status(400).json({ ok: false, message: err.message || 'Yêu cầu không hợp lệ.' });
+        }
+        console.error('Error fetching promotion usage history:', err);
+        return res.status(500).json({ ok: false, message: 'Lỗi server' });
     }
 };
 
@@ -719,14 +1094,14 @@ const consumePromotionUsage = async (promotionId) => {
  */
 router.get('/user/profile', authMiddleware, async (req, res) => {
     try {
-        const user = await User.findById(req.user.userId).select('-password');
+        let user = await User.findById(req.user.userId).select('-password');
         if (!user) {
             return res.status(404).json({ ok: false, message: 'NgÆ°á»i dÃ¹ng khÃ´ng tá»“n táº¡i' });
         }
 
-        const priorityProfile = await PriorityProfile.findOne({ userId: user._id })
-            .sort({ updatedAt: -1, createdAt: -1 })
-            .lean();
+        await applyPriorityExpiryForUser(user._id);
+        user = await User.findById(user._id).select('-password');
+        const priorityProfile = await getLatestPriorityProfileForUser(user._id);
 
         res.json({
             ok: true,
@@ -735,7 +1110,7 @@ router.get('/user/profile', authMiddleware, async (req, res) => {
                 fullName: user.fullName,
                 email: user.email,
                 phone: user.phone,
-                avatar: user.avatar,
+                avatar: normalizeAvatarPath(user.avatar),
                 role: user.role,
                 isVerified: user.isVerified,
                 walletBalance: user.walletBalance || 0,
@@ -777,7 +1152,7 @@ router.post('/user/update-profile', authMiddleware, async (req, res) => {
                 fullName: user.fullName,
                 email: user.email,
                 phone: user.phone,
-                avatar: user.avatar
+                avatar: normalizeAvatarPath(user.avatar)
             }
         });
     } catch (error) {
@@ -847,11 +1222,14 @@ router.post(
         const body = req.body || {};
         const type = String(body.type || '').trim();
         const cardNumber = String(body.cardNumber || '').trim();
-        const user = await User.findById(req.user.userId);
+        let user = await User.findById(req.user.userId);
 
         if (!user) {
-            return res.status(404).json({ ok: false, message: 'NgÆ°á»i dÃ¹ng khÃ´ng tá»“n táº¡i' });
+            return res.status(404).json({ ok: false, message: 'Người dùng không tồn tại' });
         }
+
+        await applyPriorityExpiryForUser(user._id);
+        user = await User.findById(user._id);
 
         if (!type || !cardNumber) {
             return res.status(400).json({ ok: false, message: 'Vui lòng nhập loại ưu tiên và số thẻ.' });
@@ -860,11 +1238,12 @@ router.post(
             return res.status(400).json({ ok: false, message: 'Loại ưu tiên không hợp lệ.' });
         }
 
-        const existingProfile = await PriorityProfile.findOne({ userId: user._id })
-            .sort({ updatedAt: -1, createdAt: -1 })
-            .lean();
-        if (existingProfile?.status === 'pending') {
-            return res.status(409).json({ ok: false, message: 'Hồ sơ ưu tiên của bạn đang chờ duyệt.' });
+        const existingProfile = await getLatestPriorityProfileForUser(user._id);
+        const currentPriorityStatus = normalizePriorityProfileStatus(
+            user?.priorityStatus || user?.priorityProfile?.status || existingProfile?.status || 'NONE'
+        );
+        if (['PENDING', 'APPROVED'].includes(currentPriorityStatus)) {
+            return res.status(409).json({ ok: false, message: 'Hồ sơ ưu tiên của bạn đang chờ duyệt hoặc đang hoạt động.' });
         }
 
         const cardImageFront = resolvePriorityFilePath(req.files, 'cardImageFront', body.cardImageFront);
@@ -885,26 +1264,22 @@ router.post(
         user.priorityStatus = 'PENDING';
 
         await user.save();
-        const priorityProfile = await PriorityProfile.findOneAndUpdate(
-            { userId: user._id },
-            {
-                userId: user._id,
-                category: type || 'Other',
-                idNumber: cardNumber || 'N/A',
-                idCardImageFront: cardImageFront || '',
-                idCardImageBack: cardImageBack || '',
-                proofImage: proofImage || '',
-                status: 'pending',
-                rejectionReason: null,
-                expiryDate: null
-            },
-            { upsert: true, new: true, setDefaultsOnInsert: true }
-        );
+        const priorityProfile = await PriorityProfile.create({
+            userId: user._id,
+            category: type || 'Other',
+            idNumber: cardNumber || 'N/A',
+            idCardImageFront: cardImageFront || '',
+            idCardImageBack: cardImageBack || '',
+            proofImage: proofImage || '',
+            status: 'pending',
+            rejectionReason: null,
+            expiryDate: null
+        });
         await emitPendingPriorityCount();
 
         return res.json({
             ok: true,
-            message: 'ÄÆ¡n Ä‘Äƒng kÃ½ Æ°u tiÃªn Ä‘ang chá» xÃ¡c nháº­n',
+            message: 'Hồ sơ ưu tiên đã được gửi. Đang chờ xác nhận.',
             priorityProfile: mapPriorityProfileForApi(user, priorityProfile)
         });
     } catch (error) {
@@ -920,10 +1295,13 @@ router.post(
  */
 router.get('/user/priority-status', authMiddleware, async (req, res) => {
     try {
-        const user = await User.findById(req.user.userId).select('priorityProfile priorityStatus');
-        const priorityProfile = await PriorityProfile.findOne({ userId: req.user.userId })
-            .sort({ updatedAt: -1, createdAt: -1 })
-            .lean();
+        let user = await User.findById(req.user.userId).select('priorityProfile priorityStatus');
+        if (!user) {
+            return res.status(404).json({ ok: false, message: 'Người dùng không tồn tại' });
+        }
+        await applyPriorityExpiryForUser(user._id);
+        user = await User.findById(req.user.userId).select('priorityProfile priorityStatus');
+        const priorityProfile = await getLatestPriorityProfileForUser(req.user.userId);
 
         res.json({
             ok: true,
@@ -1424,6 +1802,9 @@ router.get('/user/passes/monthly/promo-preview', authMiddleware, async (req, res
         const passType = String(req.query.passType || PASS_TYPE.SINGLE_ROUTE).trim() === PASS_TYPE.INTER_ROUTE ? PASS_TYPE.INTER_ROUTE : PASS_TYPE.SINGLE_ROUTE;
         const routeId = String(req.query.routeId || '').trim();
         const promoCode = normalizePromoCode(req.query.promoCode);
+        const now = new Date();
+
+        await releaseExpiredPromotionReservations(now);
 
         let route = null;
         if (passType === PASS_TYPE.SINGLE_ROUTE) {
@@ -1445,7 +1826,7 @@ router.get('/user/passes/monthly/promo-preview', authMiddleware, async (req, res
         );
 
         if (!Number.isFinite(basePrice) || basePrice <= 0) {
-            return res.status(400).json({ ok: false, message: 'GiÃ¡ vÃ© thÃ¡ng chÆ°a Ä‘Æ°á»£c cáº¥u hÃ¬nh.' });
+            return res.status(400).json({ ok: false, message: 'Giá vé tháng chưa được cấu hình.' });
         }
 
         const priorityDiscount = await getPriorityDiscountInfo(userId, fareMatrix);
@@ -1456,7 +1837,7 @@ router.get('/user/passes/monthly/promo-preview', authMiddleware, async (req, res
             return res.json({
                 ok: true,
                 applied: false,
-                message: 'ChÆ°a nháº­p mÃ£ giáº£m giÃ¡.',
+                message: 'Chưa nhập mã giảm giá.',
                 basePrice,
                 discountPercent: Number(priorityDiscount.discountPercent || 0),
                 priceAfterPriority,
@@ -1471,24 +1852,24 @@ router.get('/user/passes/monthly/promo-preview', authMiddleware, async (req, res
             passType,
             routeId,
             baseForPromo: priceAfterPriority,
-            now: new Date()
+            now
         });
 
         return res.json({
             ok: true,
             applied: true,
-            message: `Ãp mÃ£ ${promotion.code} thÃ nh cÃ´ng, giáº£m ${discountAmount.toLocaleString('vi-VN')} Ä‘.`,
+            message: `Áp mã ${promotion.code} thành công, giảm ${discountAmount.toLocaleString('vi-VN')} đ.`,
             promoCode: promotion.code,
             basePrice,
             discountPercent: Number(priorityDiscount.discountPercent || 0),
             priceAfterPriority,
             promoDiscountAmount: discountAmount,
-            finalPrice: Math.max(0, priceAfterPriority - discountAmount)
+            finalPrice: Math.max(1, priceAfterPriority - discountAmount)
         });
     } catch (error) {
         return res.status(400).json({
             ok: false,
-            message: error?.message || 'KhÃ´ng thá»ƒ kiá»ƒm tra mÃ£ giáº£m giÃ¡.'
+            message: error?.message || 'Không thể kiểm tra mã giảm giá.'
         });
     }
 });
@@ -1498,6 +1879,8 @@ router.get('/user/passes/monthly/promo-preview', authMiddleware, async (req, res
  * JWT checkout, trả về paymentUrl để frontend tự redirect
  */
 router.post('/user/passes/monthly/checkout', authMiddleware, async (req, res) => {
+    let pendingTx = null;
+    let promoReserved = null;
     try {
         const userId = req.user.userId;
         const passType = req.body?.passType === PASS_TYPE.INTER_ROUTE ? PASS_TYPE.INTER_ROUTE : PASS_TYPE.SINGLE_ROUTE;
@@ -1519,6 +1902,9 @@ router.post('/user/passes/monthly/checkout', authMiddleware, async (req, res) =>
 
         await applyPriorityExpiryForUser(userId);
         const now = new Date();
+        const pendingCutoff = new Date(now.getTime() - (PROMO_RESERVATION_TTL_MINUTES * 60 * 1000));
+
+        await releaseExpiredPromotionReservations(now);
         const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
         const targetMonth = new Date(year, month - 1, 1);
         if (targetMonth < currentMonth) {
@@ -1543,7 +1929,43 @@ router.post('/user/passes/monthly/checkout', authMiddleware, async (req, res) =>
         }).lean();
 
         if (duplicate) {
-            return res.status(400).json({ ok: false, message: 'Bạn đã mua vé rồi.' });
+            return res.status(409).json({
+                ok: false,
+                message: 'Vé tháng cho kỳ này đã tồn tại trong tài khoản của bạn.',
+                existingPassId: duplicate._id,
+                passType,
+                routeId: passType === PASS_TYPE.SINGLE_ROUTE ? routeId : '',
+                month,
+                year
+            });
+        }
+
+        const pendingFilter = {
+            userId,
+            txnType: 'MONTHLY_PASS',
+            status: 'PENDING',
+            createdAt: { $gt: pendingCutoff },
+            'rawReturn.passType': passType,
+            'rawReturn.month': month,
+            'rawReturn.year': year
+        };
+        if (passType === PASS_TYPE.SINGLE_ROUTE) {
+            pendingFilter['rawReturn.routeId'] = routeId;
+        }
+
+        const existingPendingTxn = await WalletTransaction.findOne(pendingFilter)
+            .select('_id txnRef createdAt')
+            .lean();
+        if (existingPendingTxn) {
+            return res.status(409).json({
+                ok: false,
+                message: 'Bạn đang có một phiên thanh toán chưa hoàn tất cho kỳ vé này. Vui lòng thanh toán xong hoặc đợi phiên hiện tại hết hạn.',
+                txnRef: existingPendingTxn.txnRef,
+                month,
+                year,
+                passType,
+                routeId: passType === PASS_TYPE.SINGLE_ROUTE ? routeId : ''
+            });
         }
 
         const { matrix: fareMatrix } = await getFareMatrix();
@@ -1563,7 +1985,7 @@ router.post('/user/passes/monthly/checkout', authMiddleware, async (req, res) =>
         let promoDiscount = 0;
         if (promoCode) {
             try {
-                const promoResult = await validatePromotionForMonthlyPass({
+                const promoResult = await reservePromotionForMonthlyPass({
                     promoCode,
                     userId,
                     passType,
@@ -1571,12 +1993,13 @@ router.post('/user/passes/monthly/checkout', authMiddleware, async (req, res) =>
                     baseForPromo: priceAfterPriority,
                     now
                 });
-                promotion = promoResult.promotion;
+                promoReserved = promoResult.promotion;
+                promotion = promoReserved;
                 promoDiscount = promoResult.discountAmount;
             } catch (promoError) {
                 return res.status(400).json({
                     ok: false,
-                    message: promoError?.message || 'Khong the ap ma giam gia cho ve thang nay.'
+                    message: promoError?.message || 'Không thể áp mã giảm giá cho vé tháng này.'
                 });
             }
         }
@@ -1585,7 +2008,7 @@ router.post('/user/passes/monthly/checkout', authMiddleware, async (req, res) =>
         const orderCode = toOrderCode();
         const txnRef = `${paymentMethod}-MP-${orderCode}`;
 
-        await WalletTransaction.create({
+        pendingTx = await WalletTransaction.create({
             userId,
             amount: finalPrice,
             originalAmount: basePrice,
@@ -1608,7 +2031,8 @@ router.post('/user/passes/monthly/checkout', authMiddleware, async (req, res) =>
                 promotionId: promotion?._id || '',
                 promoDiscount,
                 promoReleased: false,
-                promoConsumed: false
+                promoConsumed: false,
+                promoReserved: Boolean(promotion?._id)
             }
         });
 
@@ -1695,6 +2119,28 @@ router.post('/user/passes/monthly/checkout', authMiddleware, async (req, res) =>
         return res.status(400).json({ ok: false, message: 'Phương thức thanh toán không hợp lệ.' });
     } catch (error) {
         console.error('Error creating monthly pass checkout:', error);
+        if (pendingTx?._id) {
+            try {
+                await markMonthlyPassTransactionFailed(
+                    pendingTx,
+                    'FAILED',
+                    error?.message || 'Không thể khởi tạo thanh toán.'
+                );
+            } catch (markErr) {
+                console.error('Failed to mark monthly pass checkout transaction as failed:', markErr);
+            }
+            try {
+                await markPromotionReservationReleasedForTransaction(pendingTx._id);
+            } catch (releaseErr) {
+                console.error('Failed to release promotion reservation for checkout:', releaseErr);
+            }
+        } else if (promoReserved?._id) {
+            try {
+                await releasePromotionUsageSlot(promoReserved._id);
+            } catch (releaseErr) {
+                console.error('Failed to release promotion usage slot after checkout error:', releaseErr);
+            }
+        }
         return res.status(500).json({ ok: false, message: error?.message || 'Không thể khởi tạo thanh toán.' });
     }
 });
@@ -1770,12 +2216,16 @@ router.get('/user/passes/monthly/vnpay-return', async (req, res) => {
         try {
             pass = await createMonthlyPassFromTransaction(tx);
         } catch (activationError) {
-            await markMonthlyPassTransactionFailed(
-                tx,
-                'FAILED',
-                `Payment confirmed but monthly pass activation failed: ${activationError?.message || 'Unknown error.'}`,
-                query
-            );
+            try {
+                await markMonthlyPassTransactionFailed(
+                    tx,
+                    'FAILED',
+                    `Payment confirmed but monthly pass activation failed: ${activationError?.message || 'Unknown error.'}`,
+                    query
+                );
+            } catch (updateErr) {
+                console.error('Failed to mark VNPAY activation error:', updateErr);
+            }
             return res.redirect(buildMonthlyPassPageRedirectFromTransaction(
                 tx,
                 'error',
@@ -1783,26 +2233,29 @@ router.get('/user/passes/monthly/vnpay-return', async (req, res) => {
             ));
         }
 
-        const promoId = cleanText(tx?.rawReturn?.promotionId);
-        const shouldConsumePromo = Boolean(promoId && !tx?.rawReturn?.promoConsumed);
-        if (shouldConsumePromo) {
-            await Promotion.updateOne({ _id: promoId }, { $inc: { usageCount: 1 } });
+        try {
+            await finalizePromotionUsageAfterSuccessfulPayment(tx);
+        } catch (promoError) {
+            console.error('Error finalizing promotion usage after VNPAY success:', promoError);
         }
 
-        await WalletTransaction.updateOne(
-            { _id: tx._id },
-            {
-                $set: {
-                    status: 'SUCCESS',
-                    method: 'VNPAY',
-                    relatedMonthlyPassId: pass?._id || null,
-                    paidAt: new Date(),
-                    note: `VNPAY paid txnRef ${tx.txnRef}`,
-                    rawIpn: query,
-                    ...(shouldConsumePromo ? { 'rawReturn.promoConsumed': true } : {})
+        try {
+            await WalletTransaction.updateOne(
+                { _id: tx._id },
+                {
+                    $set: {
+                        status: 'SUCCESS',
+                        method: 'VNPAY',
+                        relatedMonthlyPassId: pass?._id || null,
+                        paidAt: new Date(),
+                        note: `VNPAY paid txnRef ${tx.txnRef}`,
+                        rawIpn: query
+                    }
                 }
-            }
-        );
+            );
+        } catch (updateErr) {
+            console.error('Failed to mark VNPAY monthly pass transaction as success:', updateErr);
+        }
 
         return res.redirect(buildMonthlyPassResultRedirectFromTransaction(
             tx,
@@ -1882,12 +2335,16 @@ router.all('/user/passes/monthly/momo-return', async (req, res) => {
         try {
             pass = await createMonthlyPassFromTransaction(tx);
         } catch (activationError) {
-            await markMonthlyPassTransactionFailed(
-                tx,
-                'FAILED',
-                `Payment confirmed but monthly pass activation failed: ${activationError?.message || 'Unknown error.'}`,
-                req.query
-            );
+            try {
+                await markMonthlyPassTransactionFailed(
+                    tx,
+                    'FAILED',
+                    `Payment confirmed but monthly pass activation failed: ${activationError?.message || 'Unknown error.'}`,
+                    req.query
+                );
+            } catch (updateErr) {
+                console.error('Failed to mark MoMo activation error:', updateErr);
+            }
             return res.redirect(buildMonthlyPassPageRedirectFromTransaction(
                 tx,
                 'error',
@@ -1895,26 +2352,29 @@ router.all('/user/passes/monthly/momo-return', async (req, res) => {
             ));
         }
 
-        const promoId = cleanText(tx?.rawReturn?.promotionId);
-        const shouldConsumePromo = Boolean(promoId && !tx?.rawReturn?.promoConsumed);
-        if (shouldConsumePromo) {
-            await Promotion.updateOne({ _id: promoId }, { $inc: { usageCount: 1 } });
+        try {
+            await finalizePromotionUsageAfterSuccessfulPayment(tx);
+        } catch (promoError) {
+            console.error('Error finalizing promotion usage after MoMo success:', promoError);
         }
 
-        await WalletTransaction.updateOne(
-            { _id: tx._id },
-            {
-                $set: {
-                    status: 'SUCCESS',
-                    method: 'MOMO',
-                    relatedMonthlyPassId: pass?._id || null,
-                    paidAt: new Date(),
-                    note: `MoMo paid orderId ${orderId}`,
-                    rawIpn: req.query,
-                    ...(shouldConsumePromo ? { 'rawReturn.promoConsumed': true } : {})
+        try {
+            await WalletTransaction.updateOne(
+                { _id: tx._id },
+                {
+                    $set: {
+                        status: 'SUCCESS',
+                        method: 'MOMO',
+                        relatedMonthlyPassId: pass?._id || null,
+                        paidAt: new Date(),
+                        note: `MoMo paid orderId ${orderId}`,
+                        rawIpn: req.query
+                    }
                 }
-            }
-        );
+            );
+        } catch (updateErr) {
+            console.error('Failed to mark MoMo monthly pass transaction as success:', updateErr);
+        }
 
         return res.redirect(buildMonthlyPassResultRedirectFromTransaction(
             tx,
@@ -1956,14 +2416,14 @@ router.post('/user/passes/monthly/purchase', authMiddleware, async (req, res) =>
         const promoCode = normalizePromoCode(req.body.promoCode);
 
         if (!routeId || !month || !year) {
-            return res.status(400).json({ ok: false, message: 'Thiáº¿u thÃ´ng tin tuyáº¿n hoáº·c ká»³ vÃ©' });
+            return res.status(400).json({ ok: false, message: 'Thiếu thông tin tuyến hoặc kỳ vé' });
         }
 
         await applyPriorityExpiryForUser(userId);
         const currentUser = await User.findById(userId).select("walletBalance isPriorityGroup priorityProfile");
 
         if (!currentUser) {
-            return res.status(404).json({ ok: false, message: 'NgÆ°á»i dÃ¹ng khÃ´ng tá»“n táº¡i' });
+            return res.status(404).json({ ok: false, message: 'Người dùng không tồn tại' });
         }
 
         const now = new Date();
@@ -1971,12 +2431,12 @@ router.post('/user/passes/monthly/purchase', authMiddleware, async (req, res) =>
         const targetMonthStart = new Date(year, month - 1, 1);
 
         if (targetMonthStart < currentMonthStart) {
-            return res.status(400).json({ ok: false, message: 'KhÃ´ng thá»ƒ mua vÃ© cho thÃ¡ng Ä‘Ã£ qua' });
+            return res.status(400).json({ ok: false, message: 'Không thể mua vé cho tháng đã qua' });
         }
 
         const route = await Route.findById(routeId).lean();
         if (!route || route.status !== "ACTIVE") {
-            return res.status(400).json({ ok: false, message: 'Tuyáº¿n khÃ´ng há»£p lá»‡ hoáº·c Ä‘Ã£ ngÆ°ng hoáº¡t Ä‘á»™ng' });
+            return res.status(400).json({ ok: false, message: 'Tuyến không hợp lệ hoặc đã ngừng hoạt động' });
         }
 
         const existingPass = await MonthlyPass.findOne({
@@ -1984,7 +2444,7 @@ router.post('/user/passes/monthly/purchase', authMiddleware, async (req, res) =>
         }).lean();
 
         if (existingPass) {
-            return res.status(400).json({ ok: false, message: `Báº¡n Ä‘Ã£ mua vÃ© thÃ¡ng cho tuyáº¿n nÃ y trong thÃ¡ng ${month}/${year}` });
+            return res.status(400).json({ ok: false, message: `Bạn đã mua vé tháng cho tuyến này trong tháng ${month}/${year}` });
         }
 
         const { matrix: fareMatrix } = await getFareMatrix();
@@ -1994,7 +2454,7 @@ router.post('/user/passes/monthly/purchase', authMiddleware, async (req, res) =>
             fareMatrix
         );
         if (!Number.isFinite(originalPrice) || originalPrice <= 0) {
-            return res.status(400).json({ ok: false, message: 'GiÃ¡ vÃ© thÃ¡ng tuyáº¿n nÃ y chÆ°a Ä‘Æ°á»£c cáº¥u hÃ¬nh' });
+            return res.status(400).json({ ok: false, message: 'Giá vé tháng tuyến này chưa được cấu hình' });
         }
 
         const priorityDiscount = await getPriorityDiscountInfo(userId, fareMatrix);
@@ -2002,25 +2462,35 @@ router.post('/user/passes/monthly/purchase', authMiddleware, async (req, res) =>
         const priceAfterPriority = Math.max(0, originalPrice - priorityDiscountAmount);
 
         let promoDiscountAmount = 0;
-        let promotion = null;
+        let promoReserved = null;
         if (promoCode) {
-            const promoResult = await validatePromotionForMonthlyPass({
-                promoCode,
-                userId,
-                passType: PASS_TYPE.SINGLE_ROUTE,
-                routeId,
-                baseForPromo: priceAfterPriority,
-                now: new Date()
-            });
-            promoDiscountAmount = promoResult.discountAmount;
-            promotion = promoResult.promotion;
+            try {
+                const promoResult = await reservePromotionForMonthlyPass({
+                    promoCode,
+                    userId,
+                    passType: PASS_TYPE.SINGLE_ROUTE,
+                    routeId,
+                    baseForPromo: priceAfterPriority,
+                    now
+                });
+                promoReserved = promoResult.promotion;
+                promoDiscountAmount = promoResult.discountAmount;
+            } catch (promoError) {
+                return res.status(400).json({
+                    ok: false,
+                    message: promoError?.message || 'Không thể áp mã giảm giá cho vé tháng này.'
+                });
+            }
         }
 
         const price = Math.max(0, priceAfterPriority - promoDiscountAmount);
         const discountAmount = Math.max(0, originalPrice - price);
 
         if (currentUser.walletBalance < price) {
-            return res.status(400).json({ ok: false, message: 'Sá»‘ dÆ° vÃ­ khÃ´ng Ä‘á»§ Ä‘á»ƒ mua vÃ© thÃ¡ng' });
+            if (promoReserved?._id) {
+                await releasePromotionUsageSlot(promoReserved._id);
+            }
+            return res.status(400).json({ ok: false, message: 'Số dư ví không đủ để mua vé tháng' });
         }
 
         const userAfterDeduct = await User.findOneAndUpdate(
@@ -2030,17 +2500,16 @@ router.post('/user/passes/monthly/purchase', authMiddleware, async (req, res) =>
         );
 
         if (!userAfterDeduct) {
-            return res.status(400).json({ ok: false, message: 'Giao dá»‹ch tháº¥t báº¡i, vui lÃ²ng thá»­ láº¡i' });
+            if (promoReserved?._id) {
+                await releasePromotionUsageSlot(promoReserved._id);
+            }
+            return res.status(400).json({ ok: false, message: 'Giao dịch thất bại, vui lòng thử lại' });
         }
 
         const { validFrom, validTo } = getMonthDateRange(year, month);
-        let createdPass;
+        let createdPass = null;
 
         try {
-            if (promotion?._id) {
-                await consumePromotionUsage(promotion._id);
-            }
-
             createdPass = await MonthlyPass.create({
                 userId,
                 routeId,
@@ -2059,36 +2528,56 @@ router.post('/user/passes/monthly/purchase', authMiddleware, async (req, res) =>
                 paidBy: "WALLET",
                 status: "ACTIVE"
             });
+            await WalletTransaction.create({
+                userId,
+                amount: price,
+                originalAmount: originalPrice,
+                discountAmount,
+                direction: "OUT",
+                txnType: "MONTHLY_PASS",
+                note: `Mua vé tháng tuyến ${route.routeNumber || ""} - ${route.name || ""} (${month}/${year})`,
+                method: "WALLET",
+                status: "SUCCESS",
+                relatedMonthlyPassId: createdPass._id,
+                paidAt: new Date(),
+                rawReturn: {
+                    promoCode: promoReserved?.code || "",
+                    promotionId: promoReserved?._id || "",
+                    promoDiscount: promoDiscountAmount,
+                    promoReserved: Boolean(promoReserved?._id),
+                    promoConsumed: Boolean(promoReserved?._id),
+                    promoReleased: false
+                }
+            });
         } catch (createErr) {
-            await User.findByIdAndUpdate(userId, { $inc: { walletBalance: price } });
-            if (createErr?.code === 11000) {
-                return res.status(400).json({ ok: false, message: 'Báº¡n Ä‘Ã£ mua vÃ© thÃ¡ng cho tuyáº¿n nÃ y rá»“i' });
+            try {
+                await User.findByIdAndUpdate(userId, { $inc: { walletBalance: price } });
+            } catch (refundErr) {
+                console.error('Failed to refund wallet after monthly pass create error:', refundErr);
+            }
+            if (createdPass?._id) {
+                try {
+                    await MonthlyPass.deleteOne({ _id: createdPass._id });
+                } catch (deleteErr) {
+                    console.error('Failed to delete monthly pass after transaction error:', deleteErr);
+                }
+            }
+            if (promoReserved?._id) {
+                try {
+                    await releasePromotionUsageSlot(promoReserved._id);
+                } catch (releaseErr) {
+                    console.error('Failed to release promotion usage slot after monthly pass create error:', releaseErr);
+                }
+            }
+            if (createErr?.code === 11000 && !createdPass) {
+                return res.status(400).json({ ok: false, message: 'Bạn đã mua vé tháng cho tuyến này rồi' });
             }
             throw createErr;
         }
 
-        await WalletTransaction.create({
-            userId,
-            amount: price,
-            originalAmount: originalPrice,
-            discountAmount,
-            direction: "OUT",
-            txnType: "MONTHLY_PASS",
-            note: `Mua vÃ© thÃ¡ng tuyáº¿n ${route.routeNumber || ""} - ${route.name || ""} (${month}/${year})`,
-            method: "WALLET",
-            status: "SUCCESS",
-            relatedMonthlyPassId: createdPass._id,
-            paidAt: new Date(),
-            rawReturn: {
-                promoCode: promotion?.code || '',
-                promotionId: promotion?._id || '',
-                promoDiscount: promoDiscountAmount
-            }
-        });
-
         res.json({
             ok: true,
-            message: `Mua vÃ© thÃ¡ng thÃ nh cÃ´ng cho tuyáº¿n ${route.routeNumber} (${month}/${year})`,
+            message: `Mua vé tháng thành công cho tuyến ${route.routeNumber} (${month}/${year})`,
             pass: createdPass,
             newBalance: userAfterDeduct.walletBalance
         });
@@ -2330,6 +2819,8 @@ router.get('/admin/promotions', authMiddleware, async (req, res) => {
             filter.status = status;
         }
 
+        await syncPromotionLifecycleStatuses(new Date());
+
         const [promotions, routes] = await Promise.all([
             Promotion.find(filter)
                 .populate('routeId', 'routeNumber name status')
@@ -2343,6 +2834,22 @@ router.get('/admin/promotions', authMiddleware, async (req, res) => {
         console.error('Error fetching promotions:', err);
         return res.status(500).json({ ok: false, message: 'Lỗi server' });
     }
+});
+
+/**
+ * GET /api/admin/promotions/usage-history
+ * Auth: Required (ADMIN)
+ */
+router.get('/admin/promotions/usage-history', authMiddleware, async (req, res) => {
+    return sendPromotionUsageHistory(req, res);
+});
+
+/**
+ * GET /api/admin/promotions/:id/usage-history
+ * Auth: Required (ADMIN)
+ */
+router.get('/admin/promotions/:id/usage-history', authMiddleware, async (req, res) => {
+    return sendPromotionUsageHistory(req, res, req.params.id);
 });
 
 /**
@@ -2550,6 +3057,24 @@ router.post('/admin/users/:userId/toggle-lock', authMiddleware, async (req, res)
 });
 
 /**
+ * POST /api/admin/staff/:userId/reset-password
+ * Reset a staff password and email the temporary password when possible
+ * Auth: Required (ADMIN role)
+ */
+router.post('/admin/staff/:userId/reset-password', authMiddleware, async (req, res) => {
+    return adminController.resetStaffPasswordApi(req, res);
+});
+
+/**
+ * POST /api/admin/staff/import
+ * Import staff accounts from Excel/CSV
+ * Auth: Required (ADMIN role)
+ */
+router.post('/admin/staff/import', authMiddleware, importUpload.single('staffFile'), async (req, res) => {
+    return adminController.importStaffApi(req, res);
+});
+
+/**
  * POST /api/admin/users/create
  * Create a new staff account 
  * Auth: Required (ADMIN role)
@@ -2675,7 +3200,7 @@ router.post('/admin/priority-profiles/:profileId/approve', authMiddleware, async
 
         await emitPendingPriorityCount();
 
-        res.json({ ok: true, message: 'ÄÃ£ duyá»‡t há»“ sÆ¡' });
+        res.json({ ok: true, message: 'Đã duyệt hồ sơ' });
     } catch (error) {
         console.error('Error approving profile:', error);
         res.status(500).json({ ok: false, message: 'Lá»—i server' });
@@ -2710,7 +3235,7 @@ router.post('/admin/priority-profiles/:profileId/reject', authMiddleware, async 
 
         await emitPendingPriorityCount();
 
-        res.json({ ok: true, message: 'ÄÃ£ tá»« chá»‘i há»“ sÆ¡' });
+        res.json({ ok: true, message: 'Đã từ chối hồ sơ' });
     } catch (error) {
         console.error('Error rejecting profile:', error);
         res.status(500).json({ ok: false, message: 'Lá»—i server' });

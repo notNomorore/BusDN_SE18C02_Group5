@@ -48,8 +48,12 @@ node Server.js
 ```
 
 ## Required ENV
-- `MONGO_URI`
+- `MONGODB_URI`
 - `SESSION_SECRET`
+- `BACKEND_URL`
+- `FRONTEND_URL`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
 - `EMAIL_USER`
 - `EMAIL_PASS`
 - `FIREBASE_API_KEY`
@@ -59,6 +63,7 @@ node Server.js
 - `FIREBASE_MESSAGING_SENDER_ID`
 - `FIREBASE_APP_ID`
 - `FIREBASE_MEASUREMENT_ID`
+- `VNPAY_MONTHLY_RETURN_URL` (recommended for monthly-pass flow)
 
 ## Registration URLs
 - Step 1: `http://localhost:3000/register-step1`
