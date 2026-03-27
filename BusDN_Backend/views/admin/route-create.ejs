@@ -330,6 +330,7 @@ document.addEventListener('DOMContentLoaded', function () {
         inboundLine = null;
         const bounds = [];
         const invalidStops = [];
+        const routeBuildWarnings = [];
         const directionConfigs = [['outbound', '#1d4ed8', 'Chiều đi'], ['inbound', '#f97316', 'Chiều về']];
         const directionCoords = directionConfigs.map(([key, color, label]) => {
             const coords = directionState[key].map((item) => {
@@ -372,9 +373,12 @@ document.addEventListener('DOMContentLoaded', function () {
         previewMap.fitBounds(bounds, { padding: [24, 24] });
         await Promise.all(directionCoords.map(async ({ key, color, coords }) => {
             if (coords.length < 2) return;
-            let path = coords.map((item) => item.latlng);
-            try { path = await buildRouteGeometry(coords); } catch (err) {}
+            let path = null;
+            try { path = await buildRouteGeometry(coords); } catch (err) {
+                routeBuildWarnings.push(`${key === 'outbound' ? 'Chiều đi' : 'Chiều về'} chưa lấy được đường đi thực tế.`);
+            }
             if (requestToken !== mapRequestToken) return;
+            if (!Array.isArray(path) || path.length < 2) return;
             const line = window.L.polyline(path, { color, weight: 4, opacity: .9 }).addTo(previewMap);
             if (key === 'outbound') outboundLine = line;
             else inboundLine = line;

@@ -10,6 +10,69 @@ const {
     resolveMonthlyPassBasePrice
 } = require('../services/fareMatrixService');
 
+const normalizeStopCoordinates = (stopDoc = {}) => {
+    const lat = Number(stopDoc.lat);
+    const lng = Number(stopDoc.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        return { lat, lng };
+    }
+
+    const locationLat = Number(stopDoc.location?.coordinates?.[1]);
+    const locationLng = Number(stopDoc.location?.coordinates?.[0]);
+    if (Number.isFinite(locationLat) && Number.isFinite(locationLng)) {
+        return { lat: locationLat, lng: locationLng };
+    }
+
+    return { lat: 0, lng: 0 };
+};
+
+const mapDirectionStops = (items = [], direction) => (
+    items
+        .map((item, index) => {
+            const stopDoc = item?.stopId && typeof item.stopId === 'object' ? item.stopId : null;
+            if (!stopDoc) return null;
+            const { lat, lng } = normalizeStopCoordinates(stopDoc);
+
+            return {
+                direction,
+                orderIndex: item.sequenceOrder || index + 1,
+                stopId: stopDoc._id,
+                id: stopDoc._id,
+                name: stopDoc.name || 'N/A',
+                address: stopDoc.address || '',
+                lat,
+                lng,
+                isTerminal: stopDoc.isTerminal || false
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.orderIndex - b.orderIndex)
+);
+
+const mapLegacyStopsByDirection = (stops = [], direction) => (
+    stops
+        .filter((item) => item.direction === direction)
+        .map((item) => {
+            const stopDoc = item?.stopId && typeof item.stopId === 'object' ? item.stopId : null;
+            if (!stopDoc) return null;
+            const { lat, lng } = normalizeStopCoordinates(stopDoc);
+
+            return {
+                direction,
+                orderIndex: item.orderIndex || 0,
+                stopId: stopDoc._id,
+                id: stopDoc._id,
+                name: stopDoc.name || 'N/A',
+                address: stopDoc.address || '',
+                lat,
+                lng,
+                isTerminal: stopDoc.isTerminal || false
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.orderIndex - b.orderIndex)
+);
+
 /**
  * Get all routes with optional search filter
  * Supports searching by route number or name
@@ -81,6 +144,16 @@ const getRouteDetail = async (req, res) => {
         const [route, fareRes] = await Promise.all([
             Route.findById(routeId)
                 .populate({
+                    path: 'directions.outbound.stops.stopId',
+                    model: 'Stop',
+                    select: 'name address lat lng isTerminal location'
+                })
+                .populate({
+                    path: 'directions.inbound.stops.stopId',
+                    model: 'Stop',
+                    select: 'name address lat lng isTerminal location'
+                })
+                .populate({
                     path: 'stops.stopId',
                     model: 'Stop',
                     select: 'name address lat lng isTerminal location'
@@ -106,29 +179,15 @@ const getRouteDetail = async (req, res) => {
             )
         };
 
-        // Transform stops data to ensure GeoJSON format compatibility
-        if (route.stops && Array.isArray(route.stops)) {
-            route.stops = route.stops
-                .map(stop => {
-                    const stopDoc = stop?.stopId && typeof stop.stopId === 'object' ? stop.stopId : null;
-                    if (!stopDoc) return null;
-
-                    return {
-                        ...stop,
-                        stopId: {
-                            ...stopDoc,
-                            // Fallback for lat/lng if not in GeoJSON format
-                            lat: stopDoc.location?.coordinates?.[1] || stopDoc.lat,
-                            lng: stopDoc.location?.coordinates?.[0] || stopDoc.lng,
-                            location: stopDoc.location || {
-                                type: 'Point',
-                                coordinates: [stopDoc.lng || 108.206230, stopDoc.lat || 16.047079]
-                            }
-                        }
-                    };
-                })
-                .filter(Boolean);
-        }
+        const outboundStops = route?.directions?.outbound?.stops?.length
+            ? mapDirectionStops(route.directions.outbound.stops, 'OUTBOUND')
+            : mapLegacyStopsByDirection(route.stops || [], 'OUTBOUND');
+        const inboundStops = route?.directions?.inbound?.stops?.length
+            ? mapDirectionStops(route.directions.inbound.stops, 'INBOUND')
+            : mapLegacyStopsByDirection(route.stops || [], 'INBOUND');
+        route.outboundStops = outboundStops;
+        route.inboundStops = inboundStops;
+        route.stops = [...outboundStops, ...inboundStops];
 
         res.json({
             success: true,
