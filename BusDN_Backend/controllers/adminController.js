@@ -9,7 +9,119 @@ const STAFF_ROLES = ['DRIVER', 'CONDUCTOR'];
 const normalizeText = (value) => (value || '').toString().trim();
 const normalizeEmail = (value) => normalizeText(value).toLowerCase();
 const normalizePhone = (value) => normalizeText(value);
+const normalizePhoneKey = (value) => normalizeText(value).replace(/[^\d+]/g, '');
 const normalizeRole = (value) => normalizeText(value).toUpperCase();
+const FIELD_LABELS = {
+    fullName: 'Họ tên',
+    email: 'Email',
+    phone: 'SĐT',
+    role: 'Vai trò'
+};
+
+const VALID_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const VALID_PHONE_REGEX = /^(?:\+?84|0)\d{8,9}$/;
+
+const pickImportValue = (rawRow, keys) => {
+    for (const key of keys) {
+        if (Object.prototype.hasOwnProperty.call(rawRow || {}, key)) {
+            const value = rawRow[key];
+            if (value !== undefined && value !== null && `${value}`.trim() !== '') {
+                return value;
+            }
+        }
+    }
+    return '';
+};
+
+const buildImportInputSnapshot = (rawRow = {}) => ({
+    fullName: normalizeText(pickImportValue(rawRow, ['fullName', 'fullname', 'name', 'hoTen', 'hoten', 'Họ tên', 'Họ và tên'])),
+    email: normalizeText(pickImportValue(rawRow, ['email', 'gmail', 'Email', 'Gmail'])),
+    phone: normalizeText(pickImportValue(rawRow, ['phone', 'phoneNumber', 'sdt', 'SDT', 'SĐT', 'soDienThoai', 'Số điện thoại'])),
+    role: normalizeText(pickImportValue(rawRow, ['role', 'vaiTro', 'vai trò', 'Vai trò']))
+});
+
+const isValidEmail = (value) => VALID_EMAIL_REGEX.test(normalizeEmail(value));
+const isValidPhone = (value) => VALID_PHONE_REGEX.test(normalizePhoneKey(value));
+
+const buildAccountSnapshot = (user) => {
+    if (!user) return null;
+
+    const statusText = user.status === 'LOCKED' || user.isLocked ? 'Đã khóa' : 'Hoạt động';
+    return {
+        id: user._id ? String(user._id) : null,
+        fullName: normalizeText(user.fullName),
+        email: normalizeEmail(user.email),
+        phone: normalizePhoneKey(user.phone),
+        role: user.role || '',
+        status: user.status || '',
+        isLocked: Boolean(user.isLocked),
+        summary: `${normalizeText(user.fullName) || 'Không rõ'} | ${user.role || 'N/A'} | email: ${normalizeEmail(user.email) || '(trống)'} | SĐT: ${normalizePhoneKey(user.phone) || '(trống)'} | trạng thái: ${statusText}`,
+        createdAt: user.createdAt || null
+    };
+};
+
+const buildImportIssue = ({
+    field = null,
+    code = 'VALIDATION_ERROR',
+    label = null,
+    message = '',
+    value = '',
+    account = null,
+    accounts = [],
+    referenceRow = null,
+    details = ''
+}) => ({
+    field,
+    code,
+    label: label || (field ? FIELD_LABELS[field] || field : 'Dữ liệu'),
+    message,
+    reason: message,
+    value: value == null ? '' : String(value),
+    account,
+    accounts,
+    referenceRow,
+    details
+});
+
+const buildImportFailure = ({
+    row,
+    code = 'VALIDATION_ERROR',
+    title = 'Dữ liệu không hợp lệ',
+    message = 'Vui lòng kiểm tra lại các trường được đánh dấu bên dưới.',
+    input,
+    issues = []
+}) => ({
+    row,
+    code,
+    title,
+    message,
+    reason: message,
+    input,
+    issues
+});
+
+const buildImportFailureFromError = ({ row, input, error }) => buildImportFailure({
+    row,
+    code: 'SYSTEM_ERROR',
+    title: 'Lỗi hệ thống',
+    message: error?.message || 'Không thể tạo tài khoản.',
+    input,
+    issues: [buildImportIssue({
+        code: 'SYSTEM_ERROR',
+        label: 'Hệ thống',
+        message: error?.message || 'Không thể tạo tài khoản.'
+    })]
+});
+
+const formatImportFailureForFlash = (failure) => {
+    if (!failure || typeof failure !== 'object') {
+        return String(failure || 'Lỗi không xác định');
+    }
+
+    const prefix = Number.isFinite(Number(failure.row)) ? `Dòng ${failure.row}: ` : '';
+    const message = failure.message || failure.reason || 'Lỗi không xác định';
+    return `${prefix}${message}`;
+};
 
 const generateSecurePassword = (length = 10) => {
     const upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -201,53 +313,217 @@ const getImportRows = (fileBuffer) => {
 };
 
 const parseImportRow = (rawRow) => {
-    const fullName = normalizeText(rawRow.fullName);
-    const email = normalizeEmail(rawRow.email);
-    const phone = normalizePhone(rawRow.phone);
-    const role = normalizeRole(rawRow.role);
-    return { fullName, email, phone, role };
+    const input = buildImportInputSnapshot(rawRow);
+    const fullName = input.fullName;
+    const email = normalizeEmail(input.email);
+    const phone = normalizePhone(input.phone);
+    const role = normalizeRole(input.role);
+    return { fullName, email, phone, role, input };
 };
 
 const processStaffImportRows = async ({ req, rows }) => {
     const existingUsers = await User.find({
         $or: [{ email: { $ne: null } }, { phone: { $ne: null } }]
-    }).select('email phone');
+    }).select('fullName email phone role status isLocked createdAt');
 
-    const existingEmails = new Set(existingUsers.map((u) => normalizeEmail(u.email)).filter(Boolean));
-    const existingPhones = new Set(existingUsers.map((u) => normalizePhone(u.phone)).filter(Boolean));
-    const pendingEmails = new Set();
-    const pendingPhones = new Set();
+    const existingByEmail = new Map();
+    const existingByPhone = new Map();
+    for (const user of existingUsers) {
+        const snapshot = buildAccountSnapshot(user);
+        if (snapshot?.email) existingByEmail.set(snapshot.email, snapshot);
+        if (snapshot?.phone) existingByPhone.set(snapshot.phone, snapshot);
+    }
+
+    const buildPendingSnapshot = (accountPayload) => ({
+        id: accountPayload.username || null,
+        fullName: normalizeText(accountPayload.fullName),
+        email: normalizeEmail(accountPayload.email),
+        phone: normalizePhoneKey(accountPayload.phone),
+        role: accountPayload.role || '',
+        status: 'ACTIVE',
+        isLocked: false,
+        summary: `${normalizeText(accountPayload.fullName) || 'Không rõ'} | ${accountPayload.role || 'N/A'} | email: ${normalizeEmail(accountPayload.email) || '(trống)'} | SĐT: ${normalizePhoneKey(accountPayload.phone) || '(trống)'} | trạng thái: Hoạt động`
+    });
+
+    const buildDuplicateExistingIssue = ({ field, value, account, referenceRow = null, contactLabel = null }) => buildImportIssue({
+        field,
+        code: `DUPLICATE_${field.toUpperCase()}`,
+        label: contactLabel || FIELD_LABELS[field] || field,
+        message: `${contactLabel || FIELD_LABELS[field] || field} này đã có tài khoản.`,
+        value,
+        account,
+        referenceRow,
+        details: account ? `Tài khoản hiện có: ${account.summary}` : 'Không tìm thấy thông tin tài khoản tương ứng.'
+    });
+
+    const buildDuplicatePendingIssue = ({ field, value, pendingEntry, contactLabel = null }) => buildImportIssue({
+        field,
+        code: `DUPLICATE_IN_FILE_${field.toUpperCase()}`,
+        label: contactLabel || FIELD_LABELS[field] || field,
+        message: `${contactLabel || FIELD_LABELS[field] || field} này bị trùng trong file import ở dòng ${pendingEntry.row}.`,
+        value,
+        account: pendingEntry.account,
+        referenceRow: pendingEntry.row,
+        details: `Dòng ${pendingEntry.row}: ${pendingEntry.account.summary}`
+    });
+
+    const buildContactMismatchIssue = ({ emailAccount, phoneAccount, emailValue, phoneValue }) => buildImportIssue({
+        field: 'contact',
+        code: 'CONTACT_MISMATCH',
+        label: 'Email/SĐT',
+        message: 'Email và SĐT đang thuộc 2 tài khoản khác nhau.',
+        value: `${emailValue} / ${phoneValue}`,
+        accounts: [emailAccount, phoneAccount],
+        details: `Email khớp tài khoản: ${emailAccount.summary}. SĐT khớp tài khoản: ${phoneAccount.summary}.`
+    });
 
     let imported = 0;
     let failed = 0;
     const failures = [];
     const phoneOnlyAccounts = [];
+    const pendingByEmail = new Map();
+    const pendingByPhone = new Map();
 
     for (let i = 0; i < rows.length; i += 1) {
         const rowIndex = i + 2;
-        const { fullName, email, phone, role } = parseImportRow(rows[i]);
+        const input = buildImportInputSnapshot(rows[i]);
+        const fullName = normalizeText(input.fullName);
+        const email = normalizeEmail(input.email);
+        const phone = normalizePhoneKey(input.phone);
+        const role = normalizeRole(input.role);
+        const issues = [];
 
-        if (!fullName || !role || (!email && !phone)) {
-            failed += 1;
-            failures.push(`Dong ${rowIndex}: thieu fullName/role/email-phone.`);
+        if (!fullName && !email && !phone && !role) {
             continue;
         }
 
-        if (!STAFF_ROLES.includes(role)) {
-            failed += 1;
-            failures.push(`Dong ${rowIndex}: role khong hop le (${role}).`);
-            continue;
+        if (!fullName) {
+            issues.push(buildImportIssue({
+                field: 'fullName',
+                code: 'REQUIRED_FULL_NAME',
+                label: FIELD_LABELS.fullName,
+                message: 'Cần nhập họ tên nhân viên.',
+                value: input.fullName
+            }));
+        } else if (fullName.length < 2) {
+            issues.push(buildImportIssue({
+                field: 'fullName',
+                code: 'INVALID_FULL_NAME',
+                label: FIELD_LABELS.fullName,
+                message: 'Họ tên phải có ít nhất 2 ký tự.',
+                value: input.fullName
+            }));
         }
 
-        if (email && (existingEmails.has(email) || pendingEmails.has(email))) {
-            failed += 1;
-            failures.push(`Dong ${rowIndex}: email bi trung (${email}).`);
-            continue;
+        if (!role) {
+            issues.push(buildImportIssue({
+                field: 'role',
+                code: 'REQUIRED_ROLE',
+                label: FIELD_LABELS.role,
+                message: 'Cần chọn vai trò cho nhân viên.',
+                value: input.role
+            }));
+        } else if (!STAFF_ROLES.includes(role)) {
+            issues.push(buildImportIssue({
+                field: 'role',
+                code: 'INVALID_ROLE',
+                label: FIELD_LABELS.role,
+                message: `Vai trò không hợp lệ (${input.role || 'trống'}). Chỉ chấp nhận DRIVER hoặc CONDUCTOR.`,
+                value: input.role
+            }));
         }
 
-        if (phone && (existingPhones.has(phone) || pendingPhones.has(phone))) {
+        if (!email && !phone) {
+            issues.push(buildImportIssue({
+                field: 'contact',
+                code: 'REQUIRED_CONTACT',
+                label: 'Liên hệ',
+                message: 'Cần ít nhất email hoặc SĐT.',
+                value: ''
+            }));
+        }
+
+        if (email && !isValidEmail(email)) {
+            issues.push(buildImportIssue({
+                field: 'email',
+                code: 'INVALID_EMAIL',
+                label: FIELD_LABELS.email,
+                message: 'Email không hợp lệ. Vui lòng nhập đúng định dạng email.',
+                value: input.email
+            }));
+        }
+
+        if (phone && !isValidPhone(phone)) {
+            issues.push(buildImportIssue({
+                field: 'phone',
+                code: 'INVALID_PHONE',
+                label: FIELD_LABELS.phone,
+                message: 'Số điện thoại không hợp lệ. Vui lòng nhập 9-11 chữ số, có thể kèm mã quốc gia 84.',
+                value: input.phone
+            }));
+        }
+
+        const emailExisting = email && isValidEmail(email) ? existingByEmail.get(email) : null;
+        const phoneExisting = phone && isValidPhone(phone) ? existingByPhone.get(phone) : null;
+        const emailPending = email && isValidEmail(email) ? pendingByEmail.get(email) : null;
+        const phonePending = phone && isValidPhone(phone) ? pendingByPhone.get(phone) : null;
+
+        if (email && phone && emailExisting && phoneExisting && emailExisting.id !== phoneExisting.id) {
+            issues.push(buildContactMismatchIssue({
+                emailAccount: emailExisting,
+                phoneAccount: phoneExisting,
+                emailValue: input.email,
+                phoneValue: input.phone
+            }));
+        } else {
+            if (email && emailExisting) {
+                issues.push(buildDuplicateExistingIssue({
+                    field: 'email',
+                    value: input.email,
+                    account: emailExisting,
+                    contactLabel: FIELD_LABELS.email
+                }));
+            } else if (email && emailPending) {
+                issues.push(buildDuplicatePendingIssue({
+                    field: 'email',
+                    value: input.email,
+                    pendingEntry: emailPending,
+                    contactLabel: FIELD_LABELS.email
+                }));
+            }
+
+            if (phone && phoneExisting) {
+                issues.push(buildDuplicateExistingIssue({
+                    field: 'phone',
+                    value: input.phone,
+                    account: phoneExisting,
+                    contactLabel: FIELD_LABELS.phone
+                }));
+            } else if (phone && phonePending) {
+                issues.push(buildDuplicatePendingIssue({
+                    field: 'phone',
+                    value: input.phone,
+                    pendingEntry: phonePending,
+                    contactLabel: FIELD_LABELS.phone
+                }));
+            }
+        }
+
+        if (issues.length > 0) {
             failed += 1;
-            failures.push(`Dong ${rowIndex}: phone bi trung (${phone}).`);
+            const title = issues.length === 1 ? issues[0].label : 'Dữ liệu không hợp lệ';
+            const message = issues.length === 1
+                ? issues[0].message
+                : `Dòng này có ${issues.length} lỗi. Vui lòng kiểm tra các mục bên dưới.`;
+
+            failures.push(buildImportFailure({
+                row: rowIndex,
+                code: issues.length === 1 ? issues[0].code : 'MULTIPLE_VALIDATION_ERRORS',
+                title,
+                message,
+                input,
+                issues
+            }));
             continue;
         }
 
@@ -255,15 +531,72 @@ const processStaffImportRows = async ({ req, rows }) => {
             const accountPayload = await createStaffRecord({ fullName, email, phone, role, req });
             imported += 1;
 
-            if (email) pendingEmails.add(email);
-            if (phone) pendingPhones.add(phone);
+            const pendingSnapshot = buildPendingSnapshot(accountPayload);
+            if (email) pendingByEmail.set(email, { row: rowIndex, account: pendingSnapshot });
+            if (phone) pendingByPhone.set(phone, { row: rowIndex, account: pendingSnapshot });
 
             if (!email) {
                 phoneOnlyAccounts.push(accountPayload);
             }
         } catch (error) {
             failed += 1;
-            failures.push(`Dong ${rowIndex}: ${error.message || 'tao tai khoan that bai'}`);
+
+            if (error?.code === 11000) {
+                const duplicateIssues = [];
+                const emailConflict = email ? existingByEmail.get(email) || pendingByEmail.get(email)?.account : null;
+                const phoneConflict = phone ? existingByPhone.get(phone) || pendingByPhone.get(phone)?.account : null;
+
+                if (email && phone && emailConflict && phoneConflict && emailConflict.id === phoneConflict.id) {
+                    duplicateIssues.push(buildImportIssue({
+                        field: 'contact',
+                        code: 'DUPLICATE_CONTACT',
+                        label: 'Email/SĐT',
+                        message: 'Email và SĐT này đều đã có tài khoản.',
+                        value: `${input.email} / ${input.phone}`,
+                        account: emailConflict,
+                        accounts: [emailConflict],
+                        details: `Tài khoản hiện có: ${emailConflict.summary}`
+                    }));
+                } else {
+                    if (email && emailConflict) {
+                        duplicateIssues.push(buildDuplicateExistingIssue({
+                            field: 'email',
+                            value: input.email,
+                            account: emailConflict,
+                            contactLabel: FIELD_LABELS.email
+                        }));
+                    }
+
+                    if (phone && phoneConflict) {
+                        duplicateIssues.push(buildDuplicateExistingIssue({
+                            field: 'phone',
+                            value: input.phone,
+                            account: phoneConflict,
+                            contactLabel: FIELD_LABELS.phone
+                        }));
+                    }
+                }
+
+                if (duplicateIssues.length > 0) {
+                    failures.push(buildImportFailure({
+                        row: rowIndex,
+                        code: duplicateIssues.length === 1 ? duplicateIssues[0].code : 'DUPLICATE_CONTACTS',
+                        title: duplicateIssues.length === 1 ? duplicateIssues[0].label : 'Dữ liệu đã tồn tại',
+                        message: duplicateIssues.length === 1
+                            ? duplicateIssues[0].message
+                            : 'Tài khoản vừa tạo bị trùng dữ liệu với tài khoản đã có.',
+                        input,
+                        issues: duplicateIssues
+                    }));
+                    continue;
+                }
+            }
+
+            failures.push(buildImportFailureFromError({
+                row: rowIndex,
+                input,
+                error
+            }));
         }
     }
 
@@ -340,7 +673,7 @@ exports.createStaff = async (req, res) => {
     try {
         const fullName = normalizeText(req.body.fullName);
         const email = normalizeEmail(req.body.email);
-        const phone = normalizePhone(req.body.phone);
+        const phone = normalizePhoneKey(req.body.phone);
         const role = normalizeRole(req.body.role);
 
         if (!fullName || !role || (!email && !phone)) {
@@ -424,12 +757,13 @@ exports.importStaff = async (req, res) => {
         req.session.staffOnboardingInfo = {
             source: 'bulk',
             summary: `Imported ${imported}, Failed ${failed}.`,
-            accounts: phoneOnlyAccounts
+            accounts: phoneOnlyAccounts,
+            failures
         };
 
         const resultText = `Imported ${imported}, Failed ${failed}`;
         const noteText = failures.length
-            ? ` | Chi tiet loi: ${failures.slice(0, 5).join(' ; ')}${failures.length > 5 ? ' ...' : ''}`
+            ? ` | Chi tiet loi: ${failures.slice(0, 5).map(formatImportFailureForFlash).join(' ; ')}${failures.length > 5 ? ' ...' : ''}`
             : '';
 
         return res.redirect('/admin/staff?success=' + encodeURIComponent(resultText + noteText));
