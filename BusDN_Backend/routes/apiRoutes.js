@@ -3246,16 +3246,305 @@ router.post('/admin/priority-profiles/:profileId/reject', authMiddleware, async 
 // ADMIN ROUTE MANAGEMENT
 // ============================
 
+const ADMIN_ROUTE_STATUS = ['DRAFT', 'PENDING_REVIEW', 'APPROVED', 'SCHEDULED', 'ACTIVE', 'REJECTED', 'SUSPENDED', 'INACTIVE'];
+const ADMIN_ROUTE_STOP_STATUS = ['ACTIVE', 'INACTIVE'];
+const ADMIN_ROUTE_DAY_VALUES = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+const HHMM_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+const cleanRouteField = (value) => (typeof value === 'string' ? value.trim() : '');
+const normalizeRouteIntent = (value) => (cleanRouteField(value).toLowerCase() === 'submit_review' ? 'submit_review' : 'save_draft');
+const parseRouteNumber = (value) => cleanRouteField(value).toUpperCase();
+const parseRouteDate = (value) => {
+    const raw = cleanRouteField(value);
+    if (!raw) return null;
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+const parseRouteNumeric = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+};
+const parseRouteStopItems = (items = []) => (
+    Array.isArray(items)
+        ? items.map((item, index) => ({
+            stopId: cleanRouteField(item?.stopId),
+            sequenceOrder: index + 1,
+            estimatedMinutesFromStart: Math.max(0, parseRouteNumeric(item?.estimatedMinutesFromStart) ?? 0),
+            distanceFromStart: Math.max(0, parseRouteNumeric(item?.distanceFromStart) ?? 0),
+            pickupAllowed: item?.pickupAllowed !== false,
+            dropoffAllowed: item?.dropoffAllowed !== false,
+            status: ADMIN_ROUTE_STOP_STATUS.includes(cleanRouteField(item?.status).toUpperCase())
+                ? cleanRouteField(item?.status).toUpperCase()
+                : 'ACTIVE'
+        })).filter((item) => item.stopId)
+        : []
+);
+const buildLegacyRouteStops = (outboundStops = [], inboundStops = []) => ([
+    ...outboundStops.map((item, index) => ({
+        stopId: item.stopId,
+        orderIndex: index + 1,
+        direction: 'OUTBOUND',
+        distanceFromStart: item.distanceFromStart ?? 0
+    })),
+    ...inboundStops.map((item, index) => ({
+        stopId: item.stopId,
+        orderIndex: index + 1,
+        direction: 'INBOUND',
+        distanceFromStart: item.distanceFromStart ?? 0
+    }))
+]);
+const populateAdminRouteQuery = (query) => (
+    query
+        .populate('startStopId', 'name address isTerminal status lat lng')
+        .populate('endStopId', 'name address isTerminal status lat lng')
+        .populate('directions.outbound.stops.stopId', 'name address isTerminal status lat lng')
+        .populate('directions.inbound.stops.stopId', 'name address isTerminal status lat lng')
+        .populate('stops.stopId', 'name address isTerminal status lat lng')
+);
+const mapLegacyDirectionStops = (route, direction) => (
+    (Array.isArray(route?.stops) ? route.stops : [])
+        .filter((item) => item.direction === direction && item.stopId)
+        .sort((a, b) => Number(a.orderIndex || 0) - Number(b.orderIndex || 0))
+        .map((item, index) => ({
+            stopRefId: String(item.stopId?._id || item.stopId),
+            stopId: String(item.stopId?._id || item.stopId),
+            id: String(item.stopId?._id || item.stopId),
+            name: item.stopId?.name || '',
+            address: item.stopId?.address || '',
+            lat: item.stopId?.lat ?? null,
+            lng: item.stopId?.lng ?? null,
+            estimatedMinutesFromStart: item.estimatedMinutesFromStart ?? 0,
+            distanceFromStart: item.distanceFromStart ?? 0,
+            pickupAllowed: item.pickupAllowed !== false,
+            dropoffAllowed: item.dropoffAllowed !== false,
+            status: item.status || 'ACTIVE',
+            sequenceOrder: index + 1
+        }))
+);
+const mapDirectionStopsForApi = (items = []) => (
+    items.map((item, index) => ({
+        stopRefId: String(item.stopId?._id || item.stopId),
+        stopId: String(item.stopId?._id || item.stopId),
+        id: String(item.stopId?._id || item.stopId),
+        name: item.stopId?.name || '',
+        address: item.stopId?.address || '',
+        lat: item.stopId?.lat ?? null,
+        lng: item.stopId?.lng ?? null,
+        estimatedMinutesFromStart: item.estimatedMinutesFromStart ?? 0,
+        distanceFromStart: item.distanceFromStart ?? 0,
+        pickupAllowed: item.pickupAllowed !== false,
+        dropoffAllowed: item.dropoffAllowed !== false,
+        status: item.status || 'ACTIVE',
+        sequenceOrder: index + 1
+    }))
+);
+const serializeAdminRoute = (route) => {
+    const outboundStops = route?.directions?.outbound?.stops?.length
+        ? mapDirectionStopsForApi(route.directions.outbound.stops)
+        : mapLegacyDirectionStops(route, 'OUTBOUND');
+    const inboundStops = route?.directions?.inbound?.stops?.length
+        ? mapDirectionStopsForApi(route.directions.inbound.stops)
+        : mapLegacyDirectionStops(route, 'INBOUND');
+
+    return {
+        ...route,
+        routeCode: route.routeNumber || '',
+        routeName: route.name || '',
+        startStop: route.startStopId
+            ? {
+                _id: String(route.startStopId._id || route.startStopId),
+                id: String(route.startStopId._id || route.startStopId),
+                name: route.startStopId.name || '',
+                address: route.startStopId.address || '',
+                isTerminal: Boolean(route.startStopId.isTerminal),
+                status: route.startStopId.status || 'ACTIVE',
+                lat: route.startStopId.lat ?? null,
+                lng: route.startStopId.lng ?? null
+            }
+            : null,
+        endStop: route.endStopId
+            ? {
+                _id: String(route.endStopId._id || route.endStopId),
+                id: String(route.endStopId._id || route.endStopId),
+                name: route.endStopId.name || '',
+                address: route.endStopId.address || '',
+                isTerminal: Boolean(route.endStopId.isTerminal),
+                status: route.endStopId.status || 'ACTIVE',
+                lat: route.endStopId.lat ?? null,
+                lng: route.endStopId.lng ?? null
+            }
+            : null,
+        outboundStops,
+        inboundStops,
+        stopCount: outboundStops.length
+    };
+};
+const appendRouteAuditLog = (route, { action, fromStatus = null, toStatus = null, message = '', performedBy = null }) => {
+    route.auditLogs = [
+        ...(Array.isArray(route.auditLogs) ? route.auditLogs : []),
+        {
+            action,
+            fromStatus,
+            toStatus,
+            message,
+            performedBy,
+            performedAt: new Date()
+        }
+    ];
+};
+const buildRouteNameFromStops = (startStop, endStop) => {
+    const startName = cleanRouteField(startStop?.name);
+    const endName = cleanRouteField(endStop?.name);
+    return startName && endName ? `${startName} - ${endName}` : '';
+};
+async function validateAdminRoutePayload(payload, { routeId = null, strict = false } = {}) {
+    const errors = [];
+
+    if (!payload.routeCode) errors.push('Ma tuyen la bat buoc.');
+    if (payload.startPoint && !mongoose.Types.ObjectId.isValid(payload.startPoint)) errors.push('Diem dau khong hop le.');
+    if (payload.endPoint && !mongoose.Types.ObjectId.isValid(payload.endPoint)) errors.push('Diem cuoi khong hop le.');
+    if (payload.startPoint && payload.endPoint && payload.startPoint === payload.endPoint) {
+        errors.push('Diem dau va diem cuoi khong duoc trung nhau.');
+    }
+
+    const allStopIds = [
+        payload.startPoint,
+        payload.endPoint,
+        ...payload.outboundStops.map((item) => item.stopId),
+        ...payload.inboundStops.map((item) => item.stopId)
+    ].filter(Boolean);
+
+    const invalidStopId = allStopIds.find((id) => !mongoose.Types.ObjectId.isValid(id));
+    if (invalidStopId) errors.push('Danh sach tram co stopId khong hop le.');
+
+    let stopMap = new Map();
+    if (!invalidStopId && allStopIds.length) {
+        const stops = await Stop.find({ _id: { $in: [...new Set(allStopIds)] } })
+            .select('_id name address isTerminal status lat lng')
+            .lean();
+        stopMap = new Map(stops.map((stop) => [String(stop._id), stop]));
+        if (stopMap.size !== [...new Set(allStopIds)].length) {
+            errors.push('Co tram khong ton tai trong hanh trinh.');
+        }
+    }
+
+    const duplicateRoute = payload.routeCode
+        ? await Route.findOne({
+            routeNumber: payload.routeCode,
+            ...(routeId ? { _id: { $ne: routeId } } : {})
+        }).lean()
+        : null;
+    if (duplicateRoute) errors.push(`Ma tuyen "${payload.routeCode}" da ton tai.`);
+
+    if (strict) {
+        const distance = parseRouteNumeric(payload.distance);
+        if (!payload.startPoint) errors.push('Diem dau la bat buoc.');
+        if (!payload.endPoint) errors.push('Diem cuoi la bat buoc.');
+        if (!Number.isFinite(distance) || distance <= 0) errors.push('Cu ly la bat buoc va phai lon hon 0.');
+        if (!payload.effectiveDateRaw || !payload.effectiveDate) errors.push('Ngay hieu luc la bat buoc khi gui duyet.');
+        if (!payload.startTime || !payload.endTime) errors.push('Gio van hanh la bat buoc.');
+        if ((payload.startTime && !HHMM_REGEX.test(payload.startTime)) || (payload.endTime && !HHMM_REGEX.test(payload.endTime))) {
+            errors.push('Gio van hanh khong dung dinh dang HH:mm.');
+        }
+        if (HHMM_REGEX.test(payload.startTime) && HHMM_REGEX.test(payload.endTime) && payload.startTime >= payload.endTime) {
+            errors.push('Gio bat dau phai som hon gio ket thuc.');
+        }
+        if (!Number.isFinite(parseRouteNumeric(payload.tripInterval)) || Number(payload.tripInterval) <= 0) {
+            errors.push('Tan suat chay la bat buoc.');
+        }
+        if (!Number.isFinite(parseRouteNumeric(payload.estimatedRouteDuration)) || Number(payload.estimatedRouteDuration) <= 0) {
+            errors.push('Thoi gian hanh trinh la bat buoc.');
+        }
+        if (!Array.isArray(payload.operatingDays) || payload.operatingDays.length === 0) {
+            errors.push('Vui long chon it nhat 1 ngay van hanh.');
+        }
+        if (payload.outboundStops.length < 2) errors.push('Chieu di phai co it nhat 2 tram.');
+        if (payload.inboundStops.length < 2) errors.push('Chieu ve phai co it nhat 2 tram.');
+
+        if (payload.outboundStops.length) {
+            if (payload.startPoint && payload.outboundStops[0]?.stopId !== payload.startPoint) {
+                errors.push('Chieu di phai bat dau tu dung diem.');
+            }
+            if (payload.endPoint && payload.outboundStops[payload.outboundStops.length - 1]?.stopId !== payload.endPoint) {
+                errors.push('Chieu di phai ket thuc tai dung diem.');
+            }
+        }
+
+        if (payload.inboundStops.length) {
+            if (payload.endPoint && payload.inboundStops[0]?.stopId !== payload.endPoint) {
+                errors.push('Chieu ve phai bat dau tu dung diem.');
+            }
+            if (payload.startPoint && payload.inboundStops[payload.inboundStops.length - 1]?.stopId !== payload.startPoint) {
+                errors.push('Chieu ve phai ket thuc tai dung diem.');
+            }
+        }
+    }
+
+    const startStop = payload.startPoint ? stopMap.get(payload.startPoint) : null;
+    const endStop = payload.endPoint ? stopMap.get(payload.endPoint) : null;
+    return {
+        errors: [...new Set(errors)],
+        startStop,
+        endStop,
+        routeName: payload.routeName || buildRouteNameFromStops(startStop, endStop)
+    };
+}
+const normalizeAdminRoutePayload = (body = {}) => ({
+    intent: normalizeRouteIntent(body.intent),
+    routeCode: parseRouteNumber(body.routeCode || body.routeNumber),
+    routeName: cleanRouteField(body.routeName || body.name),
+    startPoint: cleanRouteField(body.startPoint || body.startStopId),
+    endPoint: cleanRouteField(body.endPoint || body.endStopId),
+    description: cleanRouteField(body.description),
+    effectiveDateRaw: cleanRouteField(body.effectiveDate),
+    effectiveDate: parseRouteDate(body.effectiveDate),
+    monthlyPassPrice: parseRouteNumeric(body.monthlyPassPrice) ?? 200000,
+    distance: parseRouteNumeric(body.distance),
+    routeType: cleanRouteField(body.routeType),
+    serviceType: cleanRouteField(body.serviceType),
+    startTime: cleanRouteField(body.startTime || body.operationSettings?.startTime || body.operationTime?.start),
+    endTime: cleanRouteField(body.endTime || body.operationSettings?.endTime || body.operationTime?.end),
+    tripInterval: parseRouteNumeric(body.tripInterval ?? body.operationSettings?.tripInterval ?? body.frequencyMinutes),
+    estimatedRouteDuration: parseRouteNumeric(body.estimatedRouteDuration ?? body.operationSettings?.estimatedRouteDuration ?? body.roundTripMinutes),
+    turnaroundTime: parseRouteNumeric(body.turnaroundTime ?? body.operationSettings?.turnaroundTime ?? body.bufferMinutes),
+    operatingDays: Array.isArray(body.operatingDays)
+        ? body.operatingDays.map((item) => cleanRouteField(item).toUpperCase()).filter((item) => ADMIN_ROUTE_DAY_VALUES.includes(item))
+        : [],
+    notes: cleanRouteField(body.notes || body.operationSettings?.notes),
+    outboundStops: parseRouteStopItems(body.outboundStops),
+    inboundStops: parseRouteStopItems(body.inboundStops)
+});
+
+/**
+ * GET /api/admin/routes/metadata
+ * Get stops lookup for route form
+ */
+router.get('/admin/routes/metadata', authMiddleware, async (req, res) => {
+    try {
+        const adminUser = await ensureAdminApi(req, res);
+        if (!adminUser) return;
+
+        const availableStops = await Stop.find({})
+            .sort({ status: 1, isTerminal: -1, name: 1 })
+            .select('_id name address isTerminal status lat lng')
+            .lean();
+
+        res.json({ ok: true, availableStops });
+    } catch (error) {
+        console.error('Error fetching route metadata:', error);
+        res.status(500).json({ ok: false, message: 'Loi server' });
+    }
+});
+
 /**
  * GET /api/admin/routes
  * Get all routes for Admin
  */
 router.get('/admin/routes', authMiddleware, async (req, res) => {
     try {
-        const adminUser = await User.findById(req.user.userId);
-        if (!adminUser || adminUser.role !== 'ADMIN') {
-            return res.status(403).json({ ok: false, message: 'Forbidden' });
-        }
+        const adminUser = await ensureAdminApi(req, res);
+        if (!adminUser) return;
 
         const { q, status } = req.query;
         const filter = {};
@@ -3268,18 +3557,39 @@ router.get('/admin/routes', authMiddleware, async (req, res) => {
             ];
         }
 
-        if (status && ['ACTIVE', 'INACTIVE'].includes(status)) {
-            filter.status = status;
+        if (status && ADMIN_ROUTE_STATUS.includes(String(status).toUpperCase())) {
+            filter.status = String(status).toUpperCase();
         }
 
-        const routes = await Route.find(filter)
+        const routes = await populateAdminRouteQuery(Route.find(filter))
             .sort({ routeNumber: 1, createdAt: -1 })
             .lean();
 
-        res.json({ ok: true, routes });
+        res.json({ ok: true, routes: routes.map(serializeAdminRoute) });
     } catch (error) {
         console.error('Error fetching admin routes:', error);
-        res.status(500).json({ ok: false, message: 'Lá»—i server' });
+        res.status(500).json({ ok: false, message: 'Loi server' });
+    }
+});
+
+/**
+ * GET /api/admin/routes/:id
+ * Get route details for route form
+ */
+router.get('/admin/routes/:id', authMiddleware, async (req, res) => {
+    try {
+        const adminUser = await ensureAdminApi(req, res);
+        if (!adminUser) return;
+
+        const route = await populateAdminRouteQuery(Route.findById(req.params.id)).lean();
+        if (!route) {
+            return res.status(404).json({ ok: false, message: 'Khong tim thay tuyen' });
+        }
+
+        res.json({ ok: true, route: serializeAdminRoute(route) });
+    } catch (error) {
+        console.error('Error fetching admin route detail:', error);
+        res.status(500).json({ ok: false, message: 'Loi server' });
     }
 });
 
@@ -3288,41 +3598,77 @@ router.get('/admin/routes', authMiddleware, async (req, res) => {
  */
 router.post('/admin/routes/create', authMiddleware, async (req, res) => {
     try {
-        const adminUser = await User.findById(req.user.userId);
-        if (!adminUser || adminUser.role !== 'ADMIN') return res.status(403).json({ ok: false, message: 'Forbidden' });
+        const adminUser = await ensureAdminApi(req, res);
+        if (!adminUser) return;
 
-        const { routeNumber, name, distance, startTime, endTime, status, description, monthlyPassPrice, frequencyMinutes, roundTripMinutes, bufferMinutes } = req.body;
-
-        if (!routeNumber || !name || distance == null) {
-            return res.status(400).json({ ok: false, message: 'Vui lÃ²ng nháº­p Ä‘áº§y Ä‘á»§ MÃ£ tuyáº¿n, TÃªn tuyáº¿n, Cá»± ly.' });
+        const payload = normalizeAdminRoutePayload(req.body);
+        const strict = payload.intent === 'submit_review';
+        const { errors, routeName } = await validateAdminRoutePayload(payload, { strict });
+        if (errors.length) {
+            return res.status(400).json({ ok: false, message: errors[0], errors });
         }
 
-        const existed = await Route.findOne({ routeNumber: routeNumber.trim().toUpperCase() }).lean();
-        if (existed) return res.status(400).json({ ok: false, message: `MÃ£ tuyáº¿n "${routeNumber}" Ä‘Ã£ tá»“n táº¡i.` });
+        const nextStatus = strict ? 'PENDING_REVIEW' : 'DRAFT';
+        const newRoute = await Route.create({
+            routeNumber: payload.routeCode,
+            name: routeName || '',
+            description: payload.description,
+            distance: payload.distance ?? 0,
+            routeType: payload.routeType,
+            serviceType: payload.serviceType,
+            startStopId: payload.startPoint || null,
+            endStopId: payload.endPoint || null,
+            effectiveDate: payload.effectiveDate,
+            monthlyPassPrice: payload.monthlyPassPrice,
+            status: nextStatus,
+            operationTime: {
+                start: payload.startTime || '',
+                end: payload.endTime || ''
+            },
+            frequencyMinutes: payload.tripInterval ?? 15,
+            roundTripMinutes: payload.estimatedRouteDuration ?? 60,
+            bufferMinutes: payload.turnaroundTime ?? 10,
+            operationSettings: {
+                operatingDays: payload.operatingDays,
+                startTime: payload.startTime || '',
+                endTime: payload.endTime || '',
+                tripInterval: payload.tripInterval,
+                estimatedRouteDuration: payload.estimatedRouteDuration,
+                turnaroundTime: payload.turnaroundTime,
+                notes: payload.notes
+            },
+            directions: {
+                outbound: {
+                    directionKey: 'OUTBOUND',
+                    startStopId: payload.startPoint || null,
+                    endStopId: payload.endPoint || null,
+                    stops: payload.outboundStops
+                },
+                inbound: {
+                    directionKey: 'INBOUND',
+                    startStopId: payload.endPoint || null,
+                    endStopId: payload.startPoint || null,
+                    stops: payload.inboundStops
+                }
+            },
+            stops: buildLegacyRouteStops(payload.outboundStops, payload.inboundStops),
+            createdBy: req.user.userId,
+            updatedBy: req.user.userId
+        });
 
-        const payload = {
-            routeNumber: routeNumber.trim().toUpperCase(),
-            name: name.trim(),
-            distance: Number(distance),
-            description: description?.trim(),
-            status: ['ACTIVE', 'INACTIVE'].includes(status) ? status : 'ACTIVE',
-            monthlyPassPrice: monthlyPassPrice != null ? Number(monthlyPassPrice) : 200000
-        };
-
-        if (frequencyMinutes != null) payload.frequencyMinutes = Math.max(1, Number(frequencyMinutes) || 15);
-        if (roundTripMinutes != null) payload.roundTripMinutes = Math.max(1, Number(roundTripMinutes) || 60);
-        if (bufferMinutes != null) payload.bufferMinutes = Math.max(0, Number(bufferMinutes) || 0);
-
-        if (startTime && endTime) {
-            payload.operationTime = { start: startTime.trim(), end: endTime.trim() };
-        }
-
-        const newRoute = await Route.create(payload);
-        res.json({ ok: true, message: 'Táº¡o tuyáº¿n thÃ nh cÃ´ng', route: newRoute });
+        res.json({
+            ok: true,
+            message: strict ? 'Gui duyet route thanh cong' : 'Luu nhap route thanh cong',
+            route: newRoute
+        });
     } catch (err) {
         console.error('Error creating route:', err);
-        if (err.code === 11000) return res.status(400).json({ ok: false, message: 'MÃ£ tuyáº¿n Ä‘Ã£ tá»“n táº¡i.' });
-        res.status(500).json({ ok: false, message: 'Lá»—i server' });
+        if (err.code === 11000) return res.status(400).json({ ok: false, message: 'Ma tuyen da ton tai.' });
+        res.status(500).json({
+            ok: false,
+            message: 'Loi server',
+            details: err?.message || 'Unknown error'
+        });
     }
 });
 
@@ -3331,49 +3677,151 @@ router.post('/admin/routes/create', authMiddleware, async (req, res) => {
  */
 router.put('/admin/routes/:id', authMiddleware, async (req, res) => {
     try {
-        const adminUser = await User.findById(req.user.userId);
-        if (!adminUser || adminUser.role !== 'ADMIN') return res.status(403).json({ ok: false, message: 'Forbidden' });
+        const adminUser = await ensureAdminApi(req, res);
+        if (!adminUser) return;
 
-        const { id } = req.params;
-        const { routeNumber, name, distance, startTime, endTime, status, description, monthlyPassPrice, frequencyMinutes, roundTripMinutes, bufferMinutes } = req.body;
+        const route = await Route.findById(req.params.id);
+        if (!route) return res.status(404).json({ ok: false, message: 'Khong tim thay tuyen' });
 
-        const route = await Route.findById(id);
-        if (!route) return res.status(404).json({ ok: false, message: 'KhÃ´ng tÃ¬m tháº¥y tuyáº¿n' });
-
-        const checkRouteNum = routeNumber.trim().toUpperCase();
-        const existed = await Route.findOne({ routeNumber: checkRouteNum, _id: { $ne: id } }).lean();
-        if (existed) return res.status(400).json({ ok: false, message: `MÃ£ tuyáº¿n "${checkRouteNum}" Ä‘Ã£ tá»“n táº¡i.` });
-
-        route.routeNumber = checkRouteNum;
-        route.name = name.trim();
-        route.distance = Number(distance);
-        route.description = description?.trim();
-        const nextStatus = ['ACTIVE', 'INACTIVE'].includes(status) ? status : 'ACTIVE';
-        if (nextStatus === 'INACTIVE' && route.status !== 'INACTIVE') {
-            const deactivationError = await validateRouteDeactivation(route._id);
-            if (deactivationError) {
-                return res.status(409).json({ ok: false, message: deactivationError, code: 'ROUTE_DEACTIVATION_BLOCKED' });
-            }
+        const payload = normalizeAdminRoutePayload(req.body);
+        const strict = payload.intent === 'submit_review';
+        const { errors, routeName } = await validateAdminRoutePayload(payload, { routeId: route._id, strict });
+        if (errors.length) {
+            return res.status(400).json({ ok: false, message: errors[0], errors });
         }
-        route.status = nextStatus;
-        route.monthlyPassPrice = monthlyPassPrice != null ? Number(monthlyPassPrice) : 200000;
 
-        if (frequencyMinutes != null) route.frequencyMinutes = Math.max(1, Number(frequencyMinutes) || 15);
-        if (roundTripMinutes != null) route.roundTripMinutes = Math.max(1, Number(roundTripMinutes) || 60);
-        if (bufferMinutes != null) route.bufferMinutes = Math.max(0, Number(bufferMinutes) || 0);
+        route.routeNumber = payload.routeCode;
+        route.name = routeName || route.name || '';
+        route.description = payload.description;
+        route.distance = payload.distance ?? 0;
+        route.routeType = payload.routeType;
+        route.serviceType = payload.serviceType;
+        route.startStopId = payload.startPoint || null;
+        route.endStopId = payload.endPoint || null;
+        route.effectiveDate = payload.effectiveDate;
+        route.monthlyPassPrice = payload.monthlyPassPrice;
+        route.operationTime = {
+            start: payload.startTime || '',
+            end: payload.endTime || ''
+        };
+        route.frequencyMinutes = payload.tripInterval ?? 15;
+        route.roundTripMinutes = payload.estimatedRouteDuration ?? 60;
+        route.bufferMinutes = payload.turnaroundTime ?? 10;
+        route.operationSettings = {
+            operatingDays: payload.operatingDays,
+            startTime: payload.startTime || '',
+            endTime: payload.endTime || '',
+            tripInterval: payload.tripInterval,
+            estimatedRouteDuration: payload.estimatedRouteDuration,
+            turnaroundTime: payload.turnaroundTime,
+            notes: payload.notes
+        };
+        route.directions = {
+            outbound: {
+                directionKey: 'OUTBOUND',
+                startStopId: payload.startPoint || null,
+                endStopId: payload.endPoint || null,
+                stops: payload.outboundStops
+            },
+            inbound: {
+                directionKey: 'INBOUND',
+                startStopId: payload.endPoint || null,
+                endStopId: payload.startPoint || null,
+                stops: payload.inboundStops
+            }
+        };
+        route.stops = buildLegacyRouteStops(payload.outboundStops, payload.inboundStops);
+        route.updatedBy = req.user.userId;
 
-        if (startTime && endTime) {
-            route.operationTime = { start: startTime.trim(), end: endTime.trim() };
-        } else {
-            route.operationTime = undefined;
+        if (strict && ['DRAFT', 'REJECTED'].includes(route.status)) {
+            route.status = 'PENDING_REVIEW';
+        } else if (!strict && !route.status) {
+            route.status = 'DRAFT';
         }
 
         await route.save();
-        res.json({ ok: true, message: 'Cáº­p nháº­t tuyáº¿n thÃ nh cÃ´ng', route });
+        res.json({ ok: true, message: strict ? 'Gui duyet route thanh cong' : 'Cap nhat route thanh cong', route });
     } catch (err) {
         console.error('Error updating route:', err);
-        if (err.code === 11000) return res.status(400).json({ ok: false, message: 'MÃ£ tuyáº¿n Ä‘Ã£ tá»“n táº¡i.' });
-        res.status(500).json({ ok: false, message: 'Lá»—i server' });
+        if (err.code === 11000) return res.status(400).json({ ok: false, message: 'Ma tuyen da ton tai.' });
+        res.status(500).json({
+            ok: false,
+            message: 'Loi server',
+            details: err?.message || 'Unknown error'
+        });
+    }
+});
+
+/**
+ * POST /api/admin/routes/:id/approve
+ */
+router.post('/admin/routes/:id/approve', authMiddleware, async (req, res) => {
+    try {
+        const adminUser = await ensureAdminApi(req, res);
+        if (!adminUser) return;
+
+        const route = await Route.findById(req.params.id);
+        if (!route) return res.status(404).json({ ok: false, message: 'Khong tim thay tuyen' });
+        if (route.status !== 'PENDING_REVIEW') {
+            return res.status(409).json({ ok: false, message: 'Chi co the duyet tuyen dang o trang thai cho duyet.' });
+        }
+
+        const fromStatus = route.status;
+        route.status = 'APPROVED';
+        route.updatedBy = req.user.userId;
+        appendRouteAuditLog(route, {
+            action: 'APPROVE_ROUTE',
+            fromStatus,
+            toStatus: 'APPROVED',
+            message: 'Admin da duyet tuyen.',
+            performedBy: req.user.userId
+        });
+
+        await route.save();
+        const populatedRoute = await populateAdminRouteQuery(Route.findById(route._id)).lean();
+        res.json({ ok: true, message: 'Duyet tuyen thanh cong', route: populatedRoute ? serializeAdminRoute(populatedRoute) : null });
+    } catch (err) {
+        console.error('Error approving route:', err);
+        res.status(500).json({ ok: false, message: 'Loi server', details: err?.message || 'Unknown error' });
+    }
+});
+
+/**
+ * POST /api/admin/routes/:id/reject
+ */
+router.post('/admin/routes/:id/reject', authMiddleware, async (req, res) => {
+    try {
+        const adminUser = await ensureAdminApi(req, res);
+        if (!adminUser) return;
+
+        const route = await Route.findById(req.params.id);
+        if (!route) return res.status(404).json({ ok: false, message: 'Khong tim thay tuyen' });
+        if (route.status !== 'PENDING_REVIEW') {
+            return res.status(409).json({ ok: false, message: 'Chi co the tu choi tuyen dang o trang thai cho duyet.' });
+        }
+
+        const rejectionReason = cleanRouteField(req.body?.rejectionReason);
+        if (!rejectionReason) {
+            return res.status(400).json({ ok: false, message: 'Vui long nhap ly do tu choi.' });
+        }
+
+        const fromStatus = route.status;
+        route.status = 'REJECTED';
+        route.updatedBy = req.user.userId;
+        appendRouteAuditLog(route, {
+            action: 'REJECT_ROUTE',
+            fromStatus,
+            toStatus: 'REJECTED',
+            message: `Admin tu choi tuyen. Ly do: ${rejectionReason}`,
+            performedBy: req.user.userId
+        });
+
+        await route.save();
+        const populatedRoute = await populateAdminRouteQuery(Route.findById(route._id)).lean();
+        res.json({ ok: true, message: 'Tu choi tuyen thanh cong', route: populatedRoute ? serializeAdminRoute(populatedRoute) : null });
+    } catch (err) {
+        console.error('Error rejecting route:', err);
+        res.status(500).json({ ok: false, message: 'Loi server', details: err?.message || 'Unknown error' });
     }
 });
 
@@ -3389,7 +3837,14 @@ router.post('/admin/routes/:id/toggle-status', authMiddleware, async (req, res) 
         const route = await Route.findById(req.params.id);
         if (!route) return res.status(404).json({ ok: false, message: 'KhÃ´ng tÃ¬m tháº¥y tuyáº¿n' });
 
-        const nextStatus = route.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+        let nextStatus = null;
+        if (route.status === 'ACTIVE') {
+            nextStatus = 'INACTIVE';
+        } else if (['INACTIVE', 'APPROVED'].includes(route.status)) {
+            nextStatus = 'ACTIVE';
+        } else {
+            return res.status(409).json({ ok: false, message: 'Trang thai hien tai khong the chuyen sang Hoat dong/Tam ngung.' });
+        }
         if (nextStatus === 'INACTIVE') {
             const deactivationError = await validateRouteDeactivation(route._id);
             if (deactivationError) {
