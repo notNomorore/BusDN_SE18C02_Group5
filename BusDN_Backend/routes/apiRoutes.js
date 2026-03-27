@@ -231,7 +231,11 @@ const mapPromotionPayloadFromApi = (body = {}) => {
 const parsePaymentMethod = (value) => (value === PAYMENT_METHOD.MOMO ? PAYMENT_METHOD.MOMO : PAYMENT_METHOD.VNPAY);
 
 const buildBaseUrl = (req) => process.env.APP_BASE_URL || `${req.protocol}://${req.get('host')}`;
-const buildFrontendBaseUrl = () => (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+const buildFrontendBaseUrl = () => (
+    process.env.FRONTEND_URL
+    || process.env.FRONTEND_BASE_URL
+    || 'http://localhost:5173'
+).replace(/\/$/, '');
 const parsePositiveInt = (value) => {
     const parsed = Number(value);
     return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
@@ -324,7 +328,6 @@ const getVnpayBaseConfig = (req) => ({
     hashSecret: process.env.VNPAY_HASH_SECRET || '',
     vnpUrl: process.env.VNPAY_URL || 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
     returnUrl: process.env.VNPAY_MONTHLY_RETURN_URL
-        || process.env.VNPAY_RETURN_URL
         || `${buildBaseUrl(req)}/api/user/passes/monthly/vnpay-return`
 });
 

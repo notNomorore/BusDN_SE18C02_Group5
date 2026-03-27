@@ -542,7 +542,6 @@ function getVnpayBaseConfig(req) {
     const hashSecret = process.env.VNPAY_HASH_SECRET || "";
     const vnpUrl = process.env.VNPAY_URL || "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
     const returnUrl = process.env.VNPAY_MONTHLY_RETURN_URL
-        || process.env.VNPAY_RETURN_URL
         || `${buildBaseUrl(req)}/api/user/passes/monthly/vnpay-return`;
     return { tmnCode, hashSecret, vnpUrl, returnUrl };
 }
