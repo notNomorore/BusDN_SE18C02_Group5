@@ -1078,6 +1078,14 @@ const sendPromotionUsageHistory = async (req, res, promotionId = '') => {
     }
 };
 
+const LAST_OPERATION_END_CAP = '19:30';
+const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+function toMinutes(hhmm) {
+    if (!hhmm || !TIME_RE.test(String(hhmm).trim())) return null;
+    const [h, m] = String(hhmm).trim().split(':').map(Number);
+    return h * 60 + m;
+}
+
 /**
  * API Routes for Mobile Clients (Expo/React Native)
  * All routes return JSON responses
@@ -3661,6 +3669,38 @@ router.post('/admin/routes/create', authMiddleware, async (req, res) => {
             message: strict ? 'Gui duyet route thanh cong' : 'Luu nhap route thanh cong',
             route: newRoute
         });
+        const payload = {
+            routeNumber: routeNumber.trim().toUpperCase(),
+            name: name.trim(),
+            distance: Number(distance),
+            description: description?.trim(),
+            status: ['ACTIVE', 'INACTIVE'].includes(status) ? status : 'ACTIVE',
+            monthlyPassPrice: monthlyPassPrice != null ? Number(monthlyPassPrice) : 200000
+        };
+
+        if (frequencyMinutes != null) payload.frequencyMinutes = Math.max(1, Number(frequencyMinutes) || 15);
+        if (roundTripMinutes != null) payload.roundTripMinutes = Math.max(1, Number(roundTripMinutes) || 60);
+        if (bufferMinutes != null) payload.bufferMinutes = Math.max(0, Number(bufferMinutes) || 0);
+
+        if (startTime && endTime) {
+            const start = startTime.trim();
+            const end = endTime.trim();
+            if (!TIME_RE.test(start) || !TIME_RE.test(end)) {
+                return res.status(400).json({ ok: false, message: 'Giờ vận hành phải đúng định dạng HH:mm.' });
+            }
+            const endM = toMinutes(end);
+            const capM = toMinutes(LAST_OPERATION_END_CAP);
+            if (endM != null && capM != null && endM > capM) {
+                return res.status(400).json({
+                    ok: false,
+                    message: `Giờ kết thúc không được vượt quá ${LAST_OPERATION_END_CAP}.`,
+                });
+            }
+            payload.operationTime = { start, end };
+        }
+
+        const newRoute = await Route.create(payload);
+        res.json({ ok: true, message: 'Tạo tuyến thành công', route: newRoute });
     } catch (err) {
         console.error('Error creating route:', err);
         if (err.code === 11000) return res.status(400).json({ ok: false, message: 'Ma tuyen da ton tai.' });
@@ -3737,6 +3777,34 @@ router.put('/admin/routes/:id', authMiddleware, async (req, res) => {
             route.status = 'PENDING_REVIEW';
         } else if (!strict && !route.status) {
             route.status = 'DRAFT';
+        route.routeNumber = checkRouteNum;
+        route.name = name.trim();
+        route.distance = Number(distance);
+        route.description = description?.trim();
+        route.status = ['ACTIVE', 'INACTIVE'].includes(status) ? status : 'ACTIVE';
+        route.monthlyPassPrice = monthlyPassPrice != null ? Number(monthlyPassPrice) : 200000;
+
+        if (frequencyMinutes != null) route.frequencyMinutes = Math.max(1, Number(frequencyMinutes) || 15);
+        if (roundTripMinutes != null) route.roundTripMinutes = Math.max(1, Number(roundTripMinutes) || 60);
+        if (bufferMinutes != null) route.bufferMinutes = Math.max(0, Number(bufferMinutes) || 0);
+
+        if (startTime && endTime) {
+            const start = startTime.trim();
+            const end = endTime.trim();
+            if (!TIME_RE.test(start) || !TIME_RE.test(end)) {
+                return res.status(400).json({ ok: false, message: 'Giờ vận hành phải đúng định dạng HH:mm.' });
+            }
+            const endM = toMinutes(end);
+            const capM = toMinutes(LAST_OPERATION_END_CAP);
+            if (endM != null && capM != null && endM > capM) {
+                return res.status(400).json({
+                    ok: false,
+                    message: `Giờ kết thúc không được vượt quá ${LAST_OPERATION_END_CAP}.`,
+                });
+            }
+            route.operationTime = { start, end };
+        } else {
+            route.operationTime = undefined;
         }
 
         await route.save();
@@ -3991,6 +4059,7 @@ router.post('/admin/buses/create', authMiddleware, scheduleController.createBus)
 
 router.get('/admin/schedules', authMiddleware, scheduleController.getSchedules);
 router.post('/admin/schedules/generate', authMiddleware, scheduleController.generateSchedules);
+router.post('/admin/schedules/bulk-delete', authMiddleware, scheduleController.bulkDeleteSchedules);
 router.get('/admin/schedules/:id/delete-impact', authMiddleware, scheduleController.getDeleteImpact);
 router.post('/admin/schedules/:id/update-impact', authMiddleware, scheduleController.getUpdateImpact);
 router.patch('/admin/schedules/:id/archive', authMiddleware, scheduleController.archiveSchedule);
