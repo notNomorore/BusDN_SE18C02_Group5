@@ -32,6 +32,8 @@ const OPERATING_DAY_OPTIONS = [
 const clean = (v) => (typeof v === 'string' ? v.trim() : '');
 const safeUpper = (v) => clean(v).toUpperCase();
 const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+// Giới hạn thời điểm sinh lịch: xe phải về muộn nhất trước 19:30
+const LAST_OPERATION_END_CAP = '19:30';
 
 function getFlash(req, key) {
   const msg = req.session?.[key] || null;
@@ -293,6 +295,8 @@ function validateOperationSettings(formData, { strict = false } = {}) {
       errors.push('Giờ vận hành phải đúng định dạng HH:mm.');
     } else if (toMinutes(startTime) >= toMinutes(endTime)) {
       errors.push('Giờ bắt đầu phải sớm hơn giờ kết thúc.');
+    } else if (toMinutes(endTime) > toMinutes(LAST_OPERATION_END_CAP)) {
+      errors.push(`Giờ kết thúc không được vượt quá ${LAST_OPERATION_END_CAP}.`);
     }
   }
 
@@ -899,8 +903,31 @@ exports.updateRoute = async (req, res) => {
 
     const startTime = clean(req.body.startTime);
     const endTime = clean(req.body.endTime);
-    if (startTime && endTime && timeRegex.test(startTime) && timeRegex.test(endTime) && toMinutes(startTime) < toMinutes(endTime)) {
-      route.operationTime = { start: startTime, end: endTime };
+    if (startTime || endTime) {
+      // Chỉ validate khi người dùng có nhập cả 2 giờ
+      if (!startTime || !endTime) {
+        // Nếu chỉ nhập 1 phía thì giữ nguyên operationTime hiện tại (không coi là lỗi)
+      } else if (!timeRegex.test(startTime) || !timeRegex.test(endTime)) {
+        setFlash(req, 'error', 'Giờ vận hành phải đúng định dạng HH:mm.');
+        return res.redirect('/admin/routes');
+      } else {
+        const startM = toMinutes(startTime);
+        const endM = toMinutes(endTime);
+        const capM = toMinutes(LAST_OPERATION_END_CAP);
+        if (startM == null || endM == null) {
+          setFlash(req, 'error', 'Giờ vận hành không hợp lệ.');
+          return res.redirect('/admin/routes');
+        }
+        if (startM >= endM) {
+          setFlash(req, 'error', 'Giờ bắt đầu phải sớm hơn giờ kết thúc.');
+          return res.redirect('/admin/routes');
+        }
+        if (endM > capM) {
+          setFlash(req, 'error', `Giờ kết thúc không được vượt quá ${LAST_OPERATION_END_CAP}.`);
+          return res.redirect('/admin/routes');
+        }
+        route.operationTime = { start: startTime, end: endTime };
+      }
     }
 
     route.updatedBy = req.session?.userId || null;

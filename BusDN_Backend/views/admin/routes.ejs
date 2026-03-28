@@ -526,6 +526,52 @@ const stopLabel = (stop) => {
                                         }) %>
                                     </div>
                                 </div>
+                            <div class="col-md-9">
+                                <label class="form-label">Tên tuyến *</label>
+                                <input type="text" name="name" class="form-control" value="<%= safe(route.name) %>" required>
+                            </div>
+
+                            <div class="col-md-3">
+                                <label class="form-label">Cự ly (km) *</label>
+                                <input type="number" step="0.1" min="0.1" name="distance" class="form-control" value="<%= safe(route.distance) %>" required>
+                            </div>
+
+                            <div class="col-md-3">
+                                <label class="form-label">Giờ bắt đầu</label>
+                                <input type="time" name="startTime" class="form-control" value="<%= timeValue(route, 'start') %>">
+                            </div>
+
+                            <div class="col-md-3">
+                                <label class="form-label">Giờ kết thúc</label>
+                                <input type="time" name="endTime" class="form-control" value="<%= timeValue(route, 'end') %>" max="19:30">
+                            </div>
+
+                            <div class="col-md-3">
+                                <label class="form-label">Trạng thái</label>
+                                <select class="form-select" name="status">
+                                    <option value="DRAFT" <%= route.status === 'DRAFT' ? 'selected' : '' %>>Draft</option>
+                                    <option value="PENDING_REVIEW" <%= route.status === 'PENDING_REVIEW' ? 'selected' : '' %>>Pending Review</option>
+                                    <option value="APPROVED" <%= route.status === 'APPROVED' ? 'selected' : '' %>>Approved</option>
+                                    <option value="SCHEDULED" <%= route.status === 'SCHEDULED' ? 'selected' : '' %>>Scheduled</option>
+                                    <option value="ACTIVE" <%= route.status === 'ACTIVE' ? 'selected' : '' %>>Đang hoạt động</option>
+                                    <option value="REJECTED" <%= route.status === 'REJECTED' ? 'selected' : '' %>>Rejected</option>
+                                    <option value="SUSPENDED" <%= route.status === 'SUSPENDED' ? 'selected' : '' %>>Suspended</option>
+                                    <option value="INACTIVE" <%= route.status === 'INACTIVE' ? 'selected' : '' %>>Tạm ngưng</option>
+                                </select>
+                            </div>
+
+                            <div class="col-md-4">
+                                <label class="form-label">Giá vé tháng</label>
+                                <input type="number" step="1000" min="0" name="monthlyPassPrice" class="form-control" value="<%= safe(route.monthlyPassPrice) %>">
+                            </div>
+
+                            <div class="col-12">
+                                <label class="form-label">Mô tả</label>
+                                <textarea name="description" rows="3" class="form-control"><%= safe(route.description) %></textarea>
+                            </div>
+
+                            <div class="col-12">
+                                <%- include('_route-builder', { builderId: `edit-${idx}`, stopOptions, sequence: route.outboundStops || [] }) %>
                             </div>
                         </div>
                     </div>

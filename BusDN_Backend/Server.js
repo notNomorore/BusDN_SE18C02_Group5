@@ -18,7 +18,7 @@ const { upload, priorityProfileUpload } = require('./config/multer');
 const { setIO } = require('./config/socket');
 const { enforcePriorityExpiry } = require('./middleware/priorityEnforcement');
 const { applyPriorityExpiryForUser } = require('./utils/priorityUtils');
-const { persistTrackingLocation } = require('./controllers/scheduleController');
+const { persistTrackingLocation, scanAndNotifyStaleGps } = require('./controllers/scheduleController');
 
 // --- 2. SETUP EXPRESS APP ---
 const app = express();
@@ -170,6 +170,12 @@ io.on('connection', (socket) => {
         }
     });
 });
+
+setInterval(() => {
+    scanAndNotifyStaleGps().catch((error) => {
+        console.error('scanAndNotifyStaleGps error:', error);
+    });
+}, 30000);
 
 // SETUP VIEW ENGINE & PASSPORT
 configViewEngine(app);

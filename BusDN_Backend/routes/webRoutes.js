@@ -4,7 +4,7 @@ const nodemailer = require('nodemailer');
 const { User, PhoneVerification } = require('../models/models');
 const router = express.Router();
 const { checkPassword, PASS_ERR_MSG, sendEmail, generateOTP, generateResetToken } = require('../config/helpers');
-const { getAllRoutes, getRouteDetail, getRouteGeoJSON, getRouteLiveVehicles } = require('../controllers/routeController');
+const { getAllRoutes, getRouteDetail, getRouteGeoJSON, getRouteLiveVehicles, getLiveFleetVehicles } = require('../controllers/routeController');
 const { applyPriorityExpiryForUser } = require('../utils/priorityUtils');
 require('dotenv').config();
 
@@ -784,6 +784,9 @@ module.exports = (upload) => {
 
     // Get live vehicles running on a route
     router.get('/api/public/routes/:routeId/live', getRouteLiveVehicles);
+
+    // Get all live vehicles for the tracking map, optionally filtered by routeId
+    router.get('/api/public/tracking/live', getLiveFleetVehicles);
 
     return router;
 

@@ -10,6 +10,69 @@ const {
     resolveMonthlyPassBasePrice
 } = require('../services/fareMatrixService');
 
+const normalizeStopCoordinates = (stopDoc = {}) => {
+    const lat = Number(stopDoc.lat);
+    const lng = Number(stopDoc.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        return { lat, lng };
+    }
+
+    const locationLat = Number(stopDoc.location?.coordinates?.[1]);
+    const locationLng = Number(stopDoc.location?.coordinates?.[0]);
+    if (Number.isFinite(locationLat) && Number.isFinite(locationLng)) {
+        return { lat: locationLat, lng: locationLng };
+    }
+
+    return { lat: 0, lng: 0 };
+};
+
+const mapDirectionStops = (items = [], direction) => (
+    items
+        .map((item, index) => {
+            const stopDoc = item?.stopId && typeof item.stopId === 'object' ? item.stopId : null;
+            if (!stopDoc) return null;
+            const { lat, lng } = normalizeStopCoordinates(stopDoc);
+
+            return {
+                direction,
+                orderIndex: item.sequenceOrder || index + 1,
+                stopId: stopDoc._id,
+                id: stopDoc._id,
+                name: stopDoc.name || 'N/A',
+                address: stopDoc.address || '',
+                lat,
+                lng,
+                isTerminal: stopDoc.isTerminal || false
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.orderIndex - b.orderIndex)
+);
+
+const mapLegacyStopsByDirection = (stops = [], direction) => (
+    stops
+        .filter((item) => item.direction === direction)
+        .map((item) => {
+            const stopDoc = item?.stopId && typeof item.stopId === 'object' ? item.stopId : null;
+            if (!stopDoc) return null;
+            const { lat, lng } = normalizeStopCoordinates(stopDoc);
+
+            return {
+                direction,
+                orderIndex: item.orderIndex || 0,
+                stopId: stopDoc._id,
+                id: stopDoc._id,
+                name: stopDoc.name || 'N/A',
+                address: stopDoc.address || '',
+                lat,
+                lng,
+                isTerminal: stopDoc.isTerminal || false
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.orderIndex - b.orderIndex)
+);
+
 /**
  * Get all routes with optional search filter
  * Supports searching by route number or name
@@ -81,6 +144,16 @@ const getRouteDetail = async (req, res) => {
         const [route, fareRes] = await Promise.all([
             Route.findById(routeId)
                 .populate({
+                    path: 'directions.outbound.stops.stopId',
+                    model: 'Stop',
+                    select: 'name address lat lng isTerminal location'
+                })
+                .populate({
+                    path: 'directions.inbound.stops.stopId',
+                    model: 'Stop',
+                    select: 'name address lat lng isTerminal location'
+                })
+                .populate({
                     path: 'stops.stopId',
                     model: 'Stop',
                     select: 'name address lat lng isTerminal location'
@@ -106,29 +179,15 @@ const getRouteDetail = async (req, res) => {
             )
         };
 
-        // Transform stops data to ensure GeoJSON format compatibility
-        if (route.stops && Array.isArray(route.stops)) {
-            route.stops = route.stops
-                .map(stop => {
-                    const stopDoc = stop?.stopId && typeof stop.stopId === 'object' ? stop.stopId : null;
-                    if (!stopDoc) return null;
-
-                    return {
-                        ...stop,
-                        stopId: {
-                            ...stopDoc,
-                            // Fallback for lat/lng if not in GeoJSON format
-                            lat: stopDoc.location?.coordinates?.[1] || stopDoc.lat,
-                            lng: stopDoc.location?.coordinates?.[0] || stopDoc.lng,
-                            location: stopDoc.location || {
-                                type: 'Point',
-                                coordinates: [stopDoc.lng || 108.206230, stopDoc.lat || 16.047079]
-                            }
-                        }
-                    };
-                })
-                .filter(Boolean);
-        }
+        const outboundStops = route?.directions?.outbound?.stops?.length
+            ? mapDirectionStops(route.directions.outbound.stops, 'OUTBOUND')
+            : mapLegacyStopsByDirection(route.stops || [], 'OUTBOUND');
+        const inboundStops = route?.directions?.inbound?.stops?.length
+            ? mapDirectionStops(route.directions.inbound.stops, 'INBOUND')
+            : mapLegacyStopsByDirection(route.stops || [], 'INBOUND');
+        route.outboundStops = outboundStops;
+        route.inboundStops = inboundStops;
+        route.stops = [...outboundStops, ...inboundStops];
 
         res.json({
             success: true,
@@ -231,6 +290,33 @@ function getLoadMeta(schedule) {
     return { occupancyPercentage, loadColor: '#16a34a' };
 }
 
+function serializeLiveVehicle(schedule, fallbackRouteId = '') {
+    const { occupancyPercentage, loadColor } = getLoadMeta(schedule);
+    const updatedAt = schedule.currentLocation?.updatedAt || null;
+    const isOnline = updatedAt
+        ? (Date.now() - new Date(updatedAt).getTime()) <= (2 * 60 * 1000)
+        : false;
+
+    return {
+        scheduleId: String(schedule._id),
+        routeId: String(schedule.routeId?._id || schedule.routeId || fallbackRouteId || ''),
+        routeNumber: schedule.routeId?.routeNumber || '',
+        routeName: schedule.routeId?.name || '',
+        licensePlate: schedule.busId?.licensePlate || '',
+        capacity: Number(schedule.busId?.capacity || 45),
+        passengerCount: Number(schedule.passengerCount || 0),
+        occupancyPercentage,
+        loadColor,
+        loadStatus: schedule.loadStatus || 'NORMAL',
+        trackingActive: Boolean(schedule.trackingActive),
+        tripStatus: schedule.status || 'SCHEDULED',
+        busStatus: schedule.busId?.status || '',
+        driverName: schedule.driverId?.fullName || '',
+        currentLocation: schedule.currentLocation || null,
+        isOnline
+    };
+}
+
 const getRouteLiveVehicles = async (req, res) => {
     try {
         const { routeId } = req.params;
@@ -256,23 +342,7 @@ const getRouteLiveVehicles = async (req, res) => {
                 Number.isFinite(Number(schedule.currentLocation?.lat)) &&
                 Number.isFinite(Number(schedule.currentLocation?.lng))
             )
-            .map((schedule) => {
-                const { occupancyPercentage, loadColor } = getLoadMeta(schedule);
-                return {
-                    scheduleId: String(schedule._id),
-                    routeId: String(schedule.routeId?._id || routeId),
-                    routeNumber: schedule.routeId?.routeNumber || '',
-                    routeName: schedule.routeId?.name || '',
-                    licensePlate: schedule.busId?.licensePlate || '',
-                    capacity: Number(schedule.busId?.capacity || 45),
-                    passengerCount: Number(schedule.passengerCount || 0),
-                    occupancyPercentage,
-                    loadColor,
-                    loadStatus: schedule.loadStatus || 'NORMAL',
-                    driverName: schedule.driverId?.fullName || '',
-                    currentLocation: schedule.currentLocation || null
-                };
-            })
+            .map((schedule) => serializeLiveVehicle(schedule, routeId))
             .sort((a, b) => new Date(b.currentLocation?.updatedAt || 0) - new Date(a.currentLocation?.updatedAt || 0));
 
         res.json({
@@ -290,9 +360,59 @@ const getRouteLiveVehicles = async (req, res) => {
     }
 };
 
+const getLiveFleetVehicles = async (req, res) => {
+    try {
+        const routeId = String(req.query.routeId || '').trim();
+        const onlyRunning = String(req.query.onlyRunning || 'true').toLowerCase() !== 'false';
+
+        const now = new Date();
+        const start = new Date(now);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(now);
+        end.setHours(23, 59, 59, 999);
+
+        const scheduleFilter = {
+            date: { $gte: start, $lte: end },
+            archived: { $ne: true }
+        };
+        if (routeId) scheduleFilter.routeId = routeId;
+        scheduleFilter.status = onlyRunning ? 'IN_PROGRESS' : { $in: ['SCHEDULED', 'IN_PROGRESS'] };
+
+        const schedules = await Schedule.find(scheduleFilter)
+            .populate('routeId', 'routeNumber name')
+            .populate('busId', 'licensePlate capacity status')
+            .populate('driverId', 'fullName')
+            .lean();
+
+        const vehicles = schedules
+            .filter((schedule) =>
+                Number.isFinite(Number(schedule.currentLocation?.lat)) &&
+                Number.isFinite(Number(schedule.currentLocation?.lng))
+            )
+            .map((schedule) => serializeLiveVehicle(schedule))
+            .sort((a, b) => new Date(b.currentLocation?.updatedAt || 0) - new Date(a.currentLocation?.updatedAt || 0));
+
+        return res.json({
+            ok: true,
+            vehicles,
+            filters: { routeId, onlyRunning },
+            total: vehicles.length,
+            lastUpdatedAt: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Error fetching live fleet vehicles:', error);
+        return res.status(500).json({
+            ok: false,
+            message: 'Loi khi tai du lieu theo doi xe realtime',
+            vehicles: []
+        });
+    }
+};
+
 module.exports = {
     getAllRoutes,
     getRouteDetail,
     getRouteGeoJSON,
-    getRouteLiveVehicles
+    getRouteLiveVehicles,
+    getLiveFleetVehicles
 };
