@@ -45,6 +45,46 @@ const PASS_TYPE = {
 const normalizePromoCode = (value) => String(value || '').trim().toUpperCase();
 const cleanText = (value) => (typeof value === 'string' ? value.trim() : '');
 const escapeRegExp = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const QR_TOKEN_FIELDS = ['passCode', 'qrCode', 'ticketCode', 'code', 'passId', 'ticketId', 'token', 'id', '_id'];
+const QR_TOKEN_NESTED_FIELDS = ['payload', 'data', 'value', 'ticket', 'pass'];
+
+const extractQrToken = (payload, depth = 0) => {
+    if (!payload || depth > 2) return '';
+    if (typeof payload === 'string') return cleanText(payload);
+    if (typeof payload !== 'object') return '';
+
+    for (const field of QR_TOKEN_FIELDS) {
+        const candidate = cleanText(payload[field]);
+        if (candidate) return candidate;
+    }
+
+    for (const field of QR_TOKEN_NESTED_FIELDS) {
+        const nestedToken = extractQrToken(payload[field], depth + 1);
+        if (nestedToken) return nestedToken;
+    }
+
+    return '';
+};
+
+const resolveConductorQrToken = (code) => {
+    if (code && typeof code === 'object') {
+        const extractedFromObject = extractQrToken(code);
+        if (extractedFromObject) return extractedFromObject;
+    }
+
+    const raw = cleanText(code);
+    if (!raw) return '';
+
+    try {
+        const parsed = JSON.parse(raw);
+        const extracted = extractQrToken(parsed);
+        if (extracted) return extracted;
+    } catch (_err) {
+        // Plain text QR payloads fall back to the original value.
+    }
+
+    return raw;
+};
 const PAYMENT_METHOD = {
     VNPAY: 'VNPAY',
     MOMO: 'MOMO'
@@ -383,24 +423,12 @@ const mapMonthlyPassForClient = (pass) => {
     };
 };
 
-const buildPassQrPayload = (pass) => JSON.stringify({
-    provider: 'BUSDN',
-    passCode: pass.passCode,
-    passType: pass.passType === PASS_TYPE.INTER_ROUTE ? 'LIEN_TUYEN' : 'DON_TUYEN',
-    route: pass.displayRouteNumber
-        ? `${pass.displayRouteNumber} - ${pass.displayRouteName || 'Tuyen xe'}`
-        : pass.displayRouteName,
-    period: `${String(pass.month).padStart(2, '0')}/${pass.year}`,
-    validFrom: pass.validFrom ? new Date(pass.validFrom).toLocaleDateString('vi-VN') : '-',
-    validTo: pass.validTo ? new Date(pass.validTo).toLocaleDateString('vi-VN') : '-',
-    pricePaid: Number(pass.pricePaid || 0),
-    status: pass.status
-});
+const buildPassQrPayload = (pass) => String(pass.passCode || pass._id || '').trim();
 
 const generateMonthlyPassQrBuffer = (pass) => QRCode.toBuffer(buildPassQrPayload(pass), {
     type: 'png',
-    width: 180,
-    margin: 1,
+    width: 220,
+    margin: 2,
     errorCorrectionLevel: 'M'
 });
 
@@ -1226,75 +1254,75 @@ router.post(
         { name: 'proofImage', maxCount: 1 }
     ]),
     async (req, res) => {
-    try {
-        const body = req.body || {};
-        const type = String(body.type || '').trim();
-        const cardNumber = String(body.cardNumber || '').trim();
-        let user = await User.findById(req.user.userId);
+        try {
+            const body = req.body || {};
+            const type = String(body.type || '').trim();
+            const cardNumber = String(body.cardNumber || '').trim();
+            let user = await User.findById(req.user.userId);
 
-        if (!user) {
-            return res.status(404).json({ ok: false, message: 'Người dùng không tồn tại' });
+            if (!user) {
+                return res.status(404).json({ ok: false, message: 'Người dùng không tồn tại' });
+            }
+
+            await applyPriorityExpiryForUser(user._id);
+            user = await User.findById(user._id);
+
+            if (!type || !cardNumber) {
+                return res.status(400).json({ ok: false, message: 'Vui lòng nhập loại ưu tiên và số thẻ.' });
+            }
+            if (!['Student', 'War Veteran', 'Disabled', 'Elderly', 'Other'].includes(type)) {
+                return res.status(400).json({ ok: false, message: 'Loại ưu tiên không hợp lệ.' });
+            }
+
+            const existingProfile = await getLatestPriorityProfileForUser(user._id);
+            const currentPriorityStatus = normalizePriorityProfileStatus(
+                user?.priorityStatus || user?.priorityProfile?.status || existingProfile?.status || 'NONE'
+            );
+            if (['PENDING', 'APPROVED'].includes(currentPriorityStatus)) {
+                return res.status(409).json({ ok: false, message: 'Hồ sơ ưu tiên của bạn đang chờ duyệt hoặc đang hoạt động.' });
+            }
+
+            const cardImageFront = resolvePriorityFilePath(req.files, 'cardImageFront', body.cardImageFront);
+            const cardImageBack = resolvePriorityFilePath(req.files, 'cardImageBack', body.cardImageBack);
+            const proofImage = resolvePriorityFilePath(req.files, 'proofImage', body.proofImage);
+            if (!cardImageFront || !cardImageBack || !proofImage) {
+                return res.status(400).json({ ok: false, message: 'Vui lòng tải lên đầy đủ 3 ảnh giấy tờ.' });
+            }
+
+            user.priorityProfile = {
+                cardNumber,
+                cardImageFront,
+                cardImageBack,
+                expiryDate: null,
+                status: 'PENDING'
+            };
+            user.isPriorityGroup = false;
+            user.priorityStatus = 'PENDING';
+
+            await user.save();
+            const priorityProfile = await PriorityProfile.create({
+                userId: user._id,
+                category: type || 'Other',
+                idNumber: cardNumber || 'N/A',
+                idCardImageFront: cardImageFront || '',
+                idCardImageBack: cardImageBack || '',
+                proofImage: proofImage || '',
+                status: 'pending',
+                rejectionReason: null,
+                expiryDate: null
+            });
+            await emitPendingPriorityCount();
+
+            return res.json({
+                ok: true,
+                message: 'Hồ sơ ưu tiên đã được gửi. Đang chờ xác nhận.',
+                priorityProfile: mapPriorityProfileForApi(user, priorityProfile)
+            });
+        } catch (error) {
+            console.error('Error registering priority:', error);
+            res.status(500).json({ ok: false, message: 'Lá»—i server' });
         }
-
-        await applyPriorityExpiryForUser(user._id);
-        user = await User.findById(user._id);
-
-        if (!type || !cardNumber) {
-            return res.status(400).json({ ok: false, message: 'Vui lòng nhập loại ưu tiên và số thẻ.' });
-        }
-        if (!['Student', 'War Veteran', 'Disabled', 'Elderly', 'Other'].includes(type)) {
-            return res.status(400).json({ ok: false, message: 'Loại ưu tiên không hợp lệ.' });
-        }
-
-        const existingProfile = await getLatestPriorityProfileForUser(user._id);
-        const currentPriorityStatus = normalizePriorityProfileStatus(
-            user?.priorityStatus || user?.priorityProfile?.status || existingProfile?.status || 'NONE'
-        );
-        if (['PENDING', 'APPROVED'].includes(currentPriorityStatus)) {
-            return res.status(409).json({ ok: false, message: 'Hồ sơ ưu tiên của bạn đang chờ duyệt hoặc đang hoạt động.' });
-        }
-
-        const cardImageFront = resolvePriorityFilePath(req.files, 'cardImageFront', body.cardImageFront);
-        const cardImageBack = resolvePriorityFilePath(req.files, 'cardImageBack', body.cardImageBack);
-        const proofImage = resolvePriorityFilePath(req.files, 'proofImage', body.proofImage);
-        if (!cardImageFront || !cardImageBack || !proofImage) {
-            return res.status(400).json({ ok: false, message: 'Vui lòng tải lên đầy đủ 3 ảnh giấy tờ.' });
-        }
-
-        user.priorityProfile = {
-            cardNumber,
-            cardImageFront,
-            cardImageBack,
-            expiryDate: null,
-            status: 'PENDING'
-        };
-        user.isPriorityGroup = false;
-        user.priorityStatus = 'PENDING';
-
-        await user.save();
-        const priorityProfile = await PriorityProfile.create({
-            userId: user._id,
-            category: type || 'Other',
-            idNumber: cardNumber || 'N/A',
-            idCardImageFront: cardImageFront || '',
-            idCardImageBack: cardImageBack || '',
-            proofImage: proofImage || '',
-            status: 'pending',
-            rejectionReason: null,
-            expiryDate: null
-        });
-        await emitPendingPriorityCount();
-
-        return res.json({
-            ok: true,
-            message: 'Hồ sơ ưu tiên đã được gửi. Đang chờ xác nhận.',
-            priorityProfile: mapPriorityProfileForApi(user, priorityProfile)
-        });
-    } catch (error) {
-        console.error('Error registering priority:', error);
-        res.status(500).json({ ok: false, message: 'Lá»—i server' });
-    }
-});
+    });
 
 /**
  * GET /api/user/priority-status
@@ -1621,15 +1649,47 @@ router.get('/user/trip-tickets', authMiddleware, async (req, res) => {
             .lean();
 
         res.json({ ok: true, tickets });
-    } catch (error) {
-        console.error('Error listing trip tickets:', error);
-        res.status(500).json({ ok: false, message: 'Lá»—i server' });
-    }
-});
+	    } catch (error) {
+	        console.error('Error listing trip tickets:', error);
+	        res.status(500).json({ ok: false, message: 'Lá»—i server' });
+	    }
+	});
 
-// ============================
-// WALLET & BALANCE
-// ============================
+	router.get('/user/trip-tickets/:ticketId/qr', authMiddleware, async (req, res) => {
+	    try {
+	        const ticketId = String(req.params.ticketId || '').trim();
+	        if (!mongoose.Types.ObjectId.isValid(ticketId)) {
+	            return res.status(400).send('Invalid ticket id');
+	        }
+
+	        const ticket = await TripTicket.findOne({
+	            _id: ticketId,
+	            userId: req.user.userId
+	        }).lean();
+
+	        if (!ticket || !ticket.qrCode) {
+	            return res.status(404).send('Ticket not found');
+	        }
+
+	        const qrBuffer = await QRCode.toBuffer(String(ticket.qrCode).trim(), {
+	            type: 'png',
+	            width: 220,
+	            margin: 1,
+	            errorCorrectionLevel: 'M'
+	        });
+
+	        res.setHeader('Content-Type', 'image/png');
+	        res.setHeader('Cache-Control', 'private, max-age=300');
+	        return res.send(qrBuffer);
+	    } catch (error) {
+	        console.error('Error generating trip ticket QR:', error);
+	        return res.status(500).send('QR generation failed');
+	    }
+	});
+	
+	// ============================
+	// WALLET & BALANCE
+	// ============================
 
 /**
  * GET /api/user/wallet
@@ -2869,7 +2929,7 @@ router.post('/admin/promotions', authMiddleware, async (req, res) => {
         const adminUser = await ensureAdminApi(req, res);
         if (!adminUser) return;
 
-        const payload = mapPromotionPayloadFromApi(req.body);
+      //  const payload = mapPromotionPayloadFromApi(req.body);
         const errors = await validatePromotionPayloadForApi(payload, 'create');
         if (errors.length) {
             return res.status(400).json({ ok: false, message: errors[0] });
@@ -2909,7 +2969,7 @@ router.put('/admin/promotions/:id', authMiddleware, async (req, res) => {
             return res.status(404).json({ ok: false, message: 'Không tìm thấy chương trình cần cập nhật.' });
         }
 
-        const payload = mapPromotionPayloadFromApi(req.body);
+      //  const payload = mapPromotionPayloadFromApi(req.body);
         const errors = await validatePromotionPayloadForApi(payload, 'update');
         if (errors.length) {
             return res.status(400).json({ ok: false, message: errors[0] });
@@ -3609,7 +3669,7 @@ router.post('/admin/routes/create', authMiddleware, async (req, res) => {
         const adminUser = await ensureAdminApi(req, res);
         if (!adminUser) return;
 
-        const payload = normalizeAdminRoutePayload(req.body);
+       // const payload = normalizeAdminRoutePayload(req.body);
         const strict = payload.intent === 'submit_review';
         const { errors, routeName } = await validateAdminRoutePayload(payload, { strict });
         if (errors.length) {
@@ -3669,14 +3729,6 @@ router.post('/admin/routes/create', authMiddleware, async (req, res) => {
             message: strict ? 'Gui duyet route thanh cong' : 'Luu nhap route thanh cong',
             route: newRoute
         });
-        const payload = {
-            routeNumber: routeNumber.trim().toUpperCase(),
-            name: name.trim(),
-            distance: Number(distance),
-            description: description?.trim(),
-            status: ['ACTIVE', 'INACTIVE'].includes(status) ? status : 'ACTIVE',
-            monthlyPassPrice: monthlyPassPrice != null ? Number(monthlyPassPrice) : 200000
-        };
 
         if (frequencyMinutes != null) payload.frequencyMinutes = Math.max(1, Number(frequencyMinutes) || 15);
         if (roundTripMinutes != null) payload.roundTripMinutes = Math.max(1, Number(roundTripMinutes) || 60);
@@ -3699,7 +3751,7 @@ router.post('/admin/routes/create', authMiddleware, async (req, res) => {
             payload.operationTime = { start, end };
         }
 
-        const newRoute = await Route.create(payload);
+
         res.json({ ok: true, message: 'Tạo tuyến thành công', route: newRoute });
     } catch (err) {
         console.error('Error creating route:', err);
@@ -3716,110 +3768,196 @@ router.post('/admin/routes/create', authMiddleware, async (req, res) => {
  * PUT /api/admin/routes/:id
  */
 router.put('/admin/routes/:id', authMiddleware, async (req, res) => {
-    try {
-        const adminUser = await ensureAdminApi(req, res);
-        if (!adminUser) return;
+  try {
+    const adminUser = await ensureAdminApi(req, res);
+    if (!adminUser) return;
 
-        const route = await Route.findById(req.params.id);
-        if (!route) return res.status(404).json({ ok: false, message: 'Khong tim thay tuyen' });
-
-        const payload = normalizeAdminRoutePayload(req.body);
-        const strict = payload.intent === 'submit_review';
-        const { errors, routeName } = await validateAdminRoutePayload(payload, { routeId: route._id, strict });
-        if (errors.length) {
-            return res.status(400).json({ ok: false, message: errors[0], errors });
-        }
-
-        route.routeNumber = payload.routeCode;
-        route.name = routeName || route.name || '';
-        route.description = payload.description;
-        route.distance = payload.distance ?? 0;
-        route.routeType = payload.routeType;
-        route.serviceType = payload.serviceType;
-        route.startStopId = payload.startPoint || null;
-        route.endStopId = payload.endPoint || null;
-        route.effectiveDate = payload.effectiveDate;
-        route.monthlyPassPrice = payload.monthlyPassPrice;
-        route.operationTime = {
-            start: payload.startTime || '',
-            end: payload.endTime || ''
-        };
-        route.frequencyMinutes = payload.tripInterval ?? 15;
-        route.roundTripMinutes = payload.estimatedRouteDuration ?? 60;
-        route.bufferMinutes = payload.turnaroundTime ?? 10;
-        route.operationSettings = {
-            operatingDays: payload.operatingDays,
-            startTime: payload.startTime || '',
-            endTime: payload.endTime || '',
-            tripInterval: payload.tripInterval,
-            estimatedRouteDuration: payload.estimatedRouteDuration,
-            turnaroundTime: payload.turnaroundTime,
-            notes: payload.notes
-        };
-        route.directions = {
-            outbound: {
-                directionKey: 'OUTBOUND',
-                startStopId: payload.startPoint || null,
-                endStopId: payload.endPoint || null,
-                stops: payload.outboundStops
-            },
-            inbound: {
-                directionKey: 'INBOUND',
-                startStopId: payload.endPoint || null,
-                endStopId: payload.startPoint || null,
-                stops: payload.inboundStops
-            }
-        };
-        route.stops = buildLegacyRouteStops(payload.outboundStops, payload.inboundStops);
-        route.updatedBy = req.user.userId;
-
-        if (strict && ['DRAFT', 'REJECTED'].includes(route.status)) {
-            route.status = 'PENDING_REVIEW';
-        } else if (!strict && !route.status) {
-            route.status = 'DRAFT';
-        route.routeNumber = checkRouteNum;
-        route.name = name.trim();
-        route.distance = Number(distance);
-        route.description = description?.trim();
-        route.status = ['ACTIVE', 'INACTIVE'].includes(status) ? status : 'ACTIVE';
-        route.monthlyPassPrice = monthlyPassPrice != null ? Number(monthlyPassPrice) : 200000;
-
-        if (frequencyMinutes != null) route.frequencyMinutes = Math.max(1, Number(frequencyMinutes) || 15);
-        if (roundTripMinutes != null) route.roundTripMinutes = Math.max(1, Number(roundTripMinutes) || 60);
-        if (bufferMinutes != null) route.bufferMinutes = Math.max(0, Number(bufferMinutes) || 0);
-
-        if (startTime && endTime) {
-            const start = startTime.trim();
-            const end = endTime.trim();
-            if (!TIME_RE.test(start) || !TIME_RE.test(end)) {
-                return res.status(400).json({ ok: false, message: 'Giờ vận hành phải đúng định dạng HH:mm.' });
-            }
-            const endM = toMinutes(end);
-            const capM = toMinutes(LAST_OPERATION_END_CAP);
-            if (endM != null && capM != null && endM > capM) {
-                return res.status(400).json({
-                    ok: false,
-                    message: `Giờ kết thúc không được vượt quá ${LAST_OPERATION_END_CAP}.`,
-                });
-            }
-            route.operationTime = { start, end };
-        } else {
-            route.operationTime = undefined;
-        }
-
-        await route.save();
-        res.json({ ok: true, message: strict ? 'Gui duyet route thanh cong' : 'Cap nhat route thanh cong', route });
-    } catch (err) {
-        console.error('Error updating route:', err);
-        if (err.code === 11000) return res.status(400).json({ ok: false, message: 'Ma tuyen da ton tai.' });
-        res.status(500).json({
-            ok: false,
-            message: 'Loi server',
-            details: err?.message || 'Unknown error'
-        });
+    const route = await Route.findById(req.params.id);
+    if (!route) {
+      return res.status(404).json({ ok: false, message: 'Khong tim thay tuyen' });
     }
+
+ //   const payload = normalizeAdminRoutePayload(req.body);
+    const strict = payload.intent === 'submit_review';
+
+    const { errors, routeName } = await validateAdminRoutePayload(payload, {
+      routeId: route._id,
+      strict
+    });
+
+    if (errors.length) {
+      return res.status(400).json({ ok: false, message: errors[0], errors });
+    }
+
+    // ===== UPDATE DATA =====
+    route.routeNumber = payload.routeCode;
+    route.name = routeName || route.name || '';
+    route.description = payload.description;
+    route.distance = payload.distance ?? 0;
+    route.routeType = payload.routeType;
+    route.serviceType = payload.serviceType;
+    route.startStopId = payload.startPoint || null;
+    route.endStopId = payload.endPoint || null;
+    route.effectiveDate = payload.effectiveDate;
+    route.monthlyPassPrice = payload.monthlyPassPrice;
+
+    // ===== TIME =====
+    if (payload.startTime && payload.endTime) {
+      const start = payload.startTime.trim();
+      const end = payload.endTime.trim();
+
+      if (!TIME_RE.test(start) || !TIME_RE.test(end)) {
+        return res.status(400).json({
+          ok: false,
+          message: 'Giờ vận hành phải đúng định dạng HH:mm.'
+        });
+      }
+
+      const endM = toMinutes(end);
+      const capM = toMinutes(LAST_OPERATION_END_CAP);
+
+      if (endM != null && capM != null && endM > capM) {
+        return res.status(400).json({
+          ok: false,
+          message: `Giờ kết thúc không được vượt quá ${LAST_OPERATION_END_CAP}.`
+        });
+      }
+
+      route.operationTime = { start, end };
+    }
+
+    // ===== SETTINGS =====
+    route.frequencyMinutes = payload.tripInterval ?? 15;
+    route.roundTripMinutes = payload.estimatedRouteDuration ?? 60;
+    route.bufferMinutes = payload.turnaroundTime ?? 10;
+
+    route.operationSettings = {
+      operatingDays: payload.operatingDays,
+      startTime: payload.startTime || '',
+      endTime: payload.endTime || '',
+      tripInterval: payload.tripInterval,
+      estimatedRouteDuration: payload.estimatedRouteDuration,
+      turnaroundTime: payload.turnaroundTime,
+      notes: payload.notes
+    };
+
+    // ===== DIRECTIONS =====
+    route.directions = {
+      outbound: {
+        directionKey: 'OUTBOUND',
+        startStopId: payload.startPoint || null,
+        endStopId: payload.endPoint || null,
+        stops: payload.outboundStops
+      },
+      inbound: {
+        directionKey: 'INBOUND',
+        startStopId: payload.endPoint || null,
+        endStopId: payload.startPoint || null,
+        stops: payload.inboundStops
+      }
+    };
+
+    route.stops = buildLegacyRouteStops(
+      payload.outboundStops,
+      payload.inboundStops
+    );
+
+    route.updatedBy = req.user.userId;
+
+    // ===== STATUS =====
+    if (strict && ['DRAFT', 'REJECTED'].includes(route.status)) {
+      route.status = 'PENDING_REVIEW';
+    } else if (!route.status) {
+      route.status = 'DRAFT';
+    }
+
+    await route.save();
+
+    return res.json({
+      ok: true,
+      message: strict
+        ? 'Gui duyet route thanh cong'
+        : 'Cap nhat route thanh cong',
+      route
+    });
+
+  } catch (err) {
+    console.error('Error updating route:', err);
+
+    if (err.code === 11000) {
+      return res.status(400).json({
+        ok: false,
+        message: 'Ma tuyen da ton tai.'
+      });
+    }
+
+    return res.status(500).json({
+      ok: false,
+      message: 'Loi server',
+      details: err?.message || 'Unknown error'
+    });
+  }
 });
 
+router.put('/admin/routes/:id', authMiddleware, async (req, res) => {
+  try {
+    const adminUser = await ensureAdminApi(req, res);
+    if (!adminUser) return;
+
+    const route = await Route.findById(req.params.id);
+    if (!route) {
+      return res.status(404).json({ ok: false, message: 'Khong tim thay tuyen' });
+    }
+
+   // const payload = normalizeAdminRoutePayload(req.body);
+    const strict = payload.intent === 'submit_review';
+
+    const { errors, routeName } = await validateAdminRoutePayload(payload, {
+      routeId: route._id,
+      strict
+    });
+
+    if (errors.length) {
+      return res.status(400).json({ ok: false, message: errors[0], errors });
+    }
+
+    // update basic fields
+    route.routeNumber = payload.routeCode;
+    route.name = routeName || '';
+    route.description = payload.description;
+    route.distance = payload.distance ?? 0;
+
+    // status logic
+    if (strict && ['DRAFT', 'REJECTED'].includes(route.status)) {
+      route.status = 'PENDING_REVIEW';
+    } else if (!strict && !route.status) {
+      route.status = 'DRAFT';
+    }
+
+    route.updatedBy = req.user.userId;
+
+    await route.save();
+
+    return res.json({
+      ok: true,
+      message: strict ? 'Gui duyet route thanh cong' : 'Cap nhat route thanh cong',
+      route
+    });
+
+  } catch (err) {
+    console.error('Error updating route:', err);
+
+    if (err.code === 11000) {
+      return res.status(400).json({ ok: false, message: 'Ma tuyen da ton tai.' });
+    }
+
+    return res.status(500).json({
+      ok: false,
+      message: 'Loi server',
+      details: err?.message || 'Unknown error'
+    });
+  }
+});
 /**
  * POST /api/admin/routes/:id/approve
  */
@@ -4522,12 +4660,12 @@ router.post('/conductor/validate-qr', authMiddleware, async (req, res) => {
     try {
         const role = req.user?.role;
         if (!['CONDUCTOR', 'DRIVER', 'ADMIN', 'STAFF'].includes(role)) {
-            return res.status(403).json({ ok: false, message: 'Chá»‰ tÃ i xáº¿, phá»¥ xe hoáº·c nhÃ¢n viÃªn má»›i quÃ©t Ä‘Æ°á»£c vÃ©' });
+            return res.status(403).json({ ok: false, message: 'Chỉ tài xế, phụ xe hoặc nhân viên mới quét được vé' });
         }
-        const { code } = req.body;
-        if (!code) return res.status(400).json({ ok: false, message: 'MÃ£ QR khÃ´ng Ä‘Æ°á»£c Ä‘á»ƒ trá»‘ng' });
+        const code = req.body?.code;
+        if (!code) return res.status(400).json({ ok: false, message: 'Mã QR không được để trống' });
 
-        const token = code.trim();
+        const token = resolveConductorQrToken(code);
         const looksLikeObjectId = /^[a-fA-F0-9]{24}$/.test(token);
 
         let pass = null;
@@ -4544,23 +4682,23 @@ router.post('/conductor/validate-qr', authMiddleware, async (req, res) => {
         if (pass) {
             const now = new Date();
             if (pass.status && pass.status !== 'ACTIVE') {
-                return res.json({ ok: false, message: `VÃ© thÃ¡ng khÃ´ng cÃ²n hiá»‡u lá»±c (${pass.status})` });
+                return res.json({ ok: false, message: `Vé tháng không còn hiệu lực (${pass.status})` });
             }
             const validTo = pass.validTo || pass.endDate;
             if (validTo && new Date(validTo) < now) {
-                return res.json({ ok: false, message: `VÃ© Ä‘Ã£ háº¿t háº¡n (${new Date(validTo).toLocaleDateString('vi-VN')})` });
+                return res.json({ ok: false, message: `Vé đã hết hạn (${new Date(validTo).toLocaleDateString('vi-VN')})` });
             }
             const validFrom = pass.validFrom;
             if (validFrom && new Date(validFrom) > now) {
-                return res.json({ ok: false, message: `VÃ© chÆ°a Ä‘áº¿n ngÃ y hiá»‡u lá»±c (${new Date(validFrom).toLocaleDateString('vi-VN')})` });
+                return res.json({ ok: false, message: `Vé chưa đến ngày hiệu lực (${new Date(validFrom).toLocaleDateString('vi-VN')})` });
             }
             return res.json({
                 ok: true,
                 ticketType: 'MONTHLY_PASS',
-                message: 'VÃ© thÃ¡ng há»£p lá»‡',
+                message: 'Vé tháng hợp lệ',
                 passengerName: pass.userId?.fullName,
                 routeNumber: pass.routeId?.routeNumber || pass.routeSnapshot?.routeNumber,
-                validUntil: validTo ? new Date(validTo).toLocaleDateString('vi-VN') : 'KhÃ´ng giá»›i háº¡n',
+                validUntil: validTo ? new Date(validTo).toLocaleDateString('vi-VN') : 'Không giới hạn',
                 passCode: pass.passCode
             });
         }
@@ -4570,10 +4708,10 @@ router.post('/conductor/validate-qr', authMiddleware, async (req, res) => {
             .populate('routeId', 'routeNumber name')
             .populate('scheduleId', 'date departureTime shiftTime status');
         if (!ticket) {
-            return res.json({ ok: false, message: 'MÃ£ vÃ© khÃ´ng tá»“n táº¡i hoáº·c khÃ´ng há»£p lá»‡' });
+            return res.json({ ok: false, message: 'Mã vé không tồn tại hoặc không hợp lệ' });
         }
-        if (ticket.status === 'CANCELLED') return res.json({ ok: false, message: 'VÃ© Ä‘Ã£ bá»‹ há»§y' });
-        if (ticket.status === 'USED') return res.json({ ok: false, message: 'VÃ© Ä‘Ã£ Ä‘Æ°á»£c sá»­ dá»¥ng' });
+        if (ticket.status === 'CANCELLED') return res.json({ ok: false, message: 'Vé đã bị hủy' });
+        if (ticket.status === 'USED') return res.json({ ok: false, message: 'Vé đã được sử dụng' });
 
         ticket.status = 'USED';
         ticket.usedAt = new Date();
@@ -4582,7 +4720,7 @@ router.post('/conductor/validate-qr', authMiddleware, async (req, res) => {
         res.json({
             ok: true,
             ticketType: 'TRIP_TICKET',
-            message: 'VÃ© láº» há»£p lá»‡',
+            message: 'Vé lẻ hợp lệ',
             passengerName: ticket.userId?.fullName,
             routeNumber: ticket.routeId?.routeNumber,
             seatLabel: ticket.seatLabel,
