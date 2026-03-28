@@ -3775,78 +3775,12 @@ router.put('/admin/routes/:id', authMiddleware, async (req, res) => {
     const adminUser = await ensureAdminApi(req, res);
     if (!adminUser) return;
 
-        const route = await Route.findById(req.params.id);
-        if (!route) return res.status(404).json({ ok: false, message: 'Khong tim thay tuyen' });
-
-        const payload = normalizeAdminRoutePayload(req.body);
-        const strict = payload.intent === 'submit_review';
-        const { errors, routeName } = await validateAdminRoutePayload(payload, { routeId: route._id, strict });
-        if (errors.length) {
-            return res.status(400).json({ ok: false, message: errors[0], errors });
-        }
-
-        route.routeNumber = payload.routeCode;
-        route.name = routeName || route.name || '';
-        route.description = payload.description;
-        route.distance = payload.distance ?? 0;
-        route.routeType = payload.routeType;
-        route.serviceType = payload.serviceType;
-        route.startStopId = payload.startPoint || null;
-        route.endStopId = payload.endPoint || null;
-        route.effectiveDate = payload.effectiveDate;
-        route.monthlyPassPrice = payload.monthlyPassPrice;
-        route.operationTime = {
-            start: payload.startTime || '',
-            end: payload.endTime || ''
-        };
-        route.frequencyMinutes = payload.tripInterval ?? 15;
-        route.roundTripMinutes = payload.estimatedRouteDuration ?? 60;
-        route.bufferMinutes = payload.turnaroundTime ?? 10;
-        route.operationSettings = {
-            operatingDays: payload.operatingDays,
-            startTime: payload.startTime || '',
-            endTime: payload.endTime || '',
-            tripInterval: payload.tripInterval,
-            estimatedRouteDuration: payload.estimatedRouteDuration,
-            turnaroundTime: payload.turnaroundTime,
-            notes: payload.notes
-        };
-        route.directions = {
-            outbound: {
-                directionKey: 'OUTBOUND',
-                startStopId: payload.startPoint || null,
-                endStopId: payload.endPoint || null,
-                stops: payload.outboundStops
-            },
-            inbound: {
-                directionKey: 'INBOUND',
-                startStopId: payload.endPoint || null,
-                endStopId: payload.startPoint || null,
-                stops: payload.inboundStops
-            }
-        };
-        route.stops = buildLegacyRouteStops(payload.outboundStops, payload.inboundStops);
-        route.updatedBy = req.user.userId;
-
-        if (strict && ['DRAFT', 'REJECTED'].includes(route.status)) {
-            route.status = 'PENDING_REVIEW';
-        } else if (!strict && !route.status) {
-            route.status = 'DRAFT';
-        }
-
-        await route.save();
-        res.json({ ok: true, message: strict ? 'Gui duyet route thanh cong' : 'Cap nhat route thanh cong', route });
-    } catch (err) {
-        console.error('Error updating route:', err);
-        if (err.code === 11000) return res.status(400).json({ ok: false, message: 'Ma tuyen da ton tai.' });
-        res.status(500).json({
-            ok: false,
-            message: 'Loi server',
-            details: err?.message || 'Unknown error'
-        });
+    const route = await Route.findById(req.params.id);
+    if (!route) {
+      return res.status(404).json({ ok: false, message: 'Khong tim thay tuyen' });
     }
 
- //   const payload = normalizeAdminRoutePayload(req.body);
+    const payload = normalizeAdminRoutePayload(req.body);
     const strict = payload.intent === 'submit_review';
 
     const { errors, routeName } = await validateAdminRoutePayload(payload, {
@@ -3893,6 +3827,11 @@ router.put('/admin/routes/:id', authMiddleware, async (req, res) => {
       }
 
       route.operationTime = { start, end };
+    } else {
+      route.operationTime = {
+        start: payload.startTime || '',
+        end: payload.endTime || ''
+      };
     }
 
     // ===== SETTINGS =====
@@ -3936,7 +3875,7 @@ router.put('/admin/routes/:id', authMiddleware, async (req, res) => {
     // ===== STATUS =====
     if (strict && ['DRAFT', 'REJECTED'].includes(route.status)) {
       route.status = 'PENDING_REVIEW';
-    } else if (!route.status) {
+    } else if (!strict && !route.status) {
       route.status = 'DRAFT';
     }
 
