@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -21,10 +22,53 @@ const { applyPriorityExpiryForUser } = require('./utils/priorityUtils');
 
 // --- 2. SETUP EXPRESS APP ---
 const app = express();
+app.set('trust proxy', 1);
 const server = http.createServer(app);
+const getFrontendOrigin = () => (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+const allowedFrontendOrigins = new Set([
+    getFrontendOrigin(),
+    'http://127.0.0.1:5173',
+    'http://localhost:5173',
+    'https://busdn-se18c02.web.app',
+    'https://busdn-se18c02.firebaseapp.com'
+]);
+const isAllowedFrontendOrigin = (origin) => {
+    if (!origin) return false;
+    if (allowedFrontendOrigins.has(origin)) return true;
+
+    try {
+        const parsed = new URL(origin);
+        return parsed.protocol === 'https:'
+            && (parsed.hostname.endsWith('.web.app') || parsed.hostname.endsWith('.firebaseapp.com'));
+    } catch {
+        return false;
+    }
+};
+const corsOptions = {
+    origin: (origin, callback) => {
+        if (!origin || isAllowedFrontendOrigin(origin)) {
+            callback(null, true);
+            return;
+        }
+
+        callback(new Error(`Origin ${origin} is not allowed by CORS.`));
+    },
+    credentials: true,
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+    optionsSuccessStatus: 204
+};
 const io = new Server(server, {
     cors: {
-        origin: '*'
+        origin: (origin, callback) => {
+            if (!origin || isAllowedFrontendOrigin(origin)) {
+                callback(null, true);
+                return;
+            }
+
+            callback(new Error(`Origin ${origin} is not allowed by CORS.`));
+        },
+        credentials: true
     }
 });
 setIO(io);
@@ -103,12 +147,19 @@ const sendGoogleAuthPopup = (res, payload) => {
 connectDB(); 
 
 // --- 4. MIDDLEWARE (Tối ưu từ cả hai nhánh) ---
+app.use(cors(corsOptions));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(session({
     secret: process.env.SESSION_SECRET || "my_secret_key",
     resave: false,
     saveUninitialized: false,
+    proxy: true,
+    cookie: {
+        httpOnly: true,
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        secure: process.env.NODE_ENV === 'production'
+    },
 }));
 
 io.on('connection', (socket) => {
