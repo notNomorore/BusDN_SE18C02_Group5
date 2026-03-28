@@ -63,6 +63,47 @@ function deriveLoadStatus(passengerCount, capacity) {
     return 'NORMAL';
 }
 
+async function persistTrackingLocation({ scheduleId, lat, lng, accuracy, speed, heading, userId }) {
+    if (!scheduleId || lat == null || lng == null) {
+        const error = new Error('Thiếu scheduleId hoặc tọa độ GPS');
+        error.statusCode = 400;
+        throw error;
+    }
+
+    const schedule = await Schedule.findById(scheduleId)
+        .populate('busId', 'licensePlate capacity')
+        .populate('routeId', 'routeNumber name');
+    if (!schedule) {
+        const error = new Error('Không tìm thấy chuyến');
+        error.statusCode = 404;
+        throw error;
+    }
+    if (!canControlSchedule(schedule, userId)) {
+        const error = new Error('Không có quyền cập nhật vị trí chuyến này');
+        error.statusCode = 403;
+        throw error;
+    }
+
+    schedule.currentLocation = {
+        lat: Number(lat),
+        lng: Number(lng),
+        accuracy: accuracy == null ? null : Number(accuracy),
+        speed: speed == null ? null : Number(speed),
+        heading: heading == null ? null : Number(heading),
+        updatedAt: new Date()
+    };
+    schedule.trackingActive = true;
+    if (!schedule.actualStart) {
+        schedule.actualStart = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    }
+    if (schedule.status === 'SCHEDULED') {
+        schedule.status = 'IN_PROGRESS';
+    }
+    await schedule.save();
+    emitTrackingUpdate(schedule);
+    return schedule;
+}
+
 async function getBookedTripTicketUserIds(scheduleId) {
     const rows = await TripTicket.find({ scheduleId, status: 'BOOKED' }).select('userId').lean();
     return [...new Set(rows.map((r) => String(r.userId)))];
@@ -994,6 +1035,8 @@ exports.updateTrackingLocation = async (req, res) => {
         return res.status(500).json({ ok: false, message: 'Lỗi server' });
     }
 };
+
+exports.persistTrackingLocation = persistTrackingLocation;
 
 exports.updateLoadStatus = async (req, res) => {
     try {

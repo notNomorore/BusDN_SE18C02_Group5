@@ -18,6 +18,7 @@ const { upload, priorityProfileUpload } = require('./config/multer');
 const { setIO } = require('./config/socket');
 const { enforcePriorityExpiry } = require('./middleware/priorityEnforcement');
 const { applyPriorityExpiryForUser } = require('./utils/priorityUtils');
+const { persistTrackingLocation } = require('./controllers/scheduleController');
 
 // --- 2. SETUP EXPRESS APP ---
 const app = express();
@@ -132,10 +133,40 @@ io.on('connection', (socket) => {
             const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret_key');
             if (!decoded?.userId || !decoded?.role) return;
 
+            socket.data.userId = String(decoded.userId);
+            socket.data.role = decoded.role;
             socket.join(`user:${decoded.userId}`);
             socket.join(`role:${decoded.role}`);
         } catch (err) {
             // ignore invalid token
+        }
+    });
+
+    socket.on('tracking:update-location', async (payload = {}, callback) => {
+        try {
+            if (!socket.data?.userId) {
+                throw new Error('Unauthorized socket');
+            }
+
+            const schedule = await persistTrackingLocation({
+                ...payload,
+                userId: socket.data.userId
+            });
+
+            if (typeof callback === 'function') {
+                callback({
+                    ok: true,
+                    scheduleId: String(schedule._id),
+                    updatedAt: schedule.currentLocation?.updatedAt || new Date().toISOString()
+                });
+            }
+        } catch (error) {
+            if (typeof callback === 'function') {
+                callback({
+                    ok: false,
+                    message: error.message || 'Tracking update failed'
+                });
+            }
         }
     });
 });
