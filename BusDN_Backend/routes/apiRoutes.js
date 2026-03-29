@@ -14,6 +14,13 @@ const scheduleController = require('../controllers/scheduleController'); // NEW
 const adminController = require('../controllers/adminController');
 const { getIO } = require('../config/socket');
 const { normalizeAvatarPath } = require('../utils/avatar');
+const {
+    buildEmailRegex,
+    buildPhoneVariants,
+    normalizeEmail,
+    normalizePhone,
+    normalizeText
+} = require('../utils/authIdentity');
 const importUpload = multer({ storage: multer.memoryStorage() });
 const {
     getFareMatrix,
@@ -3157,7 +3164,10 @@ router.post('/admin/users/create', authMiddleware, async (req, res) => {
             return res.status(403).json({ ok: false, message: 'Forbidden' });
         }
 
-        const { fullName, email, phone, role } = req.body;
+        const fullName = normalizeText(req.body.fullName);
+        const email = normalizeEmail(req.body.email);
+        const phone = normalizePhone(req.body.phone);
+        const role = normalizeText(req.body.role).toUpperCase();
 
         if (!fullName || !role || (!email && !phone)) {
             return res.status(400).json({ ok: false, message: 'Vui lÃ²ng cung cáº¥p Ä‘á»§ há» tÃªn, vai trÃ² vÃ  Ã­t nháº¥t SÄT hoáº·c Email' });
@@ -3165,11 +3175,11 @@ router.post('/admin/users/create', authMiddleware, async (req, res) => {
 
         // Check if existing
         if (email) {
-            const existingByEmail = await User.findOne({ email });
+            const existingByEmail = await User.findOne({ email: buildEmailRegex(email) });
             if (existingByEmail) return res.status(400).json({ ok: false, message: 'Email Ä‘Ã£ tá»“n táº¡i' });
         }
         if (phone) {
-            const existingByPhone = await User.findOne({ phone });
+            const existingByPhone = await User.findOne({ phone: { $in: buildPhoneVariants(phone) } });
             if (existingByPhone) return res.status(400).json({ ok: false, message: 'Sá»‘ Ä‘iá»‡n thoáº¡i Ä‘Ã£ tá»“n táº¡i' });
         }
 
@@ -3196,8 +3206,8 @@ router.post('/admin/users/create', authMiddleware, async (req, res) => {
             message: 'Táº¡o tÃ i khoáº£n thÃ nh cÃ´ng',
             account: {
                 fullName,
-                email,
-                phone,
+                email: email || '',
+                phone: phone || '',
                 role,
                 username: email || phone,
                 password // Return generated password to display to Admin

@@ -3,6 +3,7 @@ const XLSX = require('xlsx');
 const { User } = require('../models/models');
 const { sendEmail } = require('../config/helpers');
 const { renderAdmin } = require('../middleware/renderAdmin');
+const { buildFrontendLoginUrl } = require('../utils/authIdentity');
 
 const STAFF_ROLES = ['DRIVER', 'CONDUCTOR'];
 
@@ -151,7 +152,7 @@ const generateSecurePassword = (length = 10) => {
     return seed.join('');
 };
 
-const buildLoginUrl = (req) => `${req.protocol}://${req.get('host')}/login`;
+const buildLoginUrl = () => buildFrontendLoginUrl();
 
 const buildWelcomeEmailHtml = ({ fullName, username, password, role, loginUrl }) => {
     const roleText = role === 'DRIVER' ? 'Tai xe' : 'Phu xe';
@@ -203,8 +204,8 @@ const createStaffRecord = async ({ fullName, email, phone, role, req }) => {
 
     const user = new User({
         fullName,
-        email: email || undefined,
-        phone: phone || undefined,
+        email: normalizeEmail(email) || undefined,
+        phone: normalizePhoneKey(phone) || undefined,
         role,
         password: hashedPassword,
         isVerified: true,
@@ -215,18 +216,18 @@ const createStaffRecord = async ({ fullName, email, phone, role, req }) => {
 
     await user.save();
 
-    const username = email || phone;
+    const username = normalizeEmail(email) || normalizePhoneKey(phone) || '';
     const accountPayload = {
         fullName,
-        email: email || '',
-        phone: phone || '',
+        email: normalizeEmail(email) || '',
+        phone: normalizePhoneKey(phone) || '',
         role,
         username,
         password
     };
 
     if (email) {
-        const loginUrl = buildLoginUrl(req);
+        const loginUrl = buildLoginUrl();
         await sendEmail(
             email,
             'Tai khoan BusDN da duoc tao',
@@ -260,18 +261,18 @@ exports.resetStaffPasswordApi = async (req, res) => {
         user.isFirstLogin = true;
         await user.save();
 
-        const username = user.email || user.phone || '';
+        const username = normalizeEmail(user.email) || normalizePhoneKey(user.phone) || '';
         const accountPayload = {
             fullName: user.fullName,
-            email: user.email || '',
-            phone: user.phone || '',
+            email: normalizeEmail(user.email) || '',
+            phone: normalizePhoneKey(user.phone) || '',
             role: user.role,
             username,
             password
         };
 
         if (user.email) {
-            const loginUrl = buildLoginUrl(req);
+            const loginUrl = buildLoginUrl();
             await sendEmail(
                 user.email,
                 'Mat khau BusDN da duoc dat lai',
