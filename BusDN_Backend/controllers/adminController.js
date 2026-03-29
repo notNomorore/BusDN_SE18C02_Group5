@@ -198,6 +198,16 @@ const buildResetPasswordEmailHtml = ({ fullName, username, password, role, login
     `;
 };
 
+const summarizeMailError = (error) => {
+    if (!error) return '';
+    return [
+        error?.message || '',
+        error?.code || '',
+        error?.responseCode || '',
+        error?.response || ''
+    ].filter(Boolean).join(' | ');
+};
+
 const createStaffRecord = async ({ fullName, email, phone, role, req }) => {
     const password = generateSecurePassword(10);
     const hashedPassword = await bcrypt.hash(password, await bcrypt.genSalt(10));
@@ -215,6 +225,7 @@ const createStaffRecord = async ({ fullName, email, phone, role, req }) => {
     });
 
     await user.save();
+    console.log(`[staff-mail] account-created userId=${user._id} role=${role} email=${normalizeEmail(email) || '(none)'} phone=${normalizePhoneKey(phone) || '(none)'} source=${req?.method || 'SYSTEM'} ${req?.originalUrl || req?.path || ''}`);
 
     const username = normalizeEmail(email) || normalizePhoneKey(phone) || '';
     const accountPayload = {
@@ -227,24 +238,33 @@ const createStaffRecord = async ({ fullName, email, phone, role, req }) => {
     };
 
     let emailSent = false;
+    let emailError = '';
 
     try {
         if (email && email.trim() !== "") {
             const loginUrl = buildLoginUrl();
+            console.log(`[staff-mail] attempting-welcome-email to=${normalizeEmail(email)} loginUrl=${loginUrl}`);
             emailSent = await sendEmail(
                 email,
                 'Tai khoan BusDN da duoc tao',
                 buildWelcomeEmailHtml({ fullName, username, password, role, loginUrl })
             );
+            console.log(`[staff-mail] welcome-email-result to=${normalizeEmail(email)} emailSent=${emailSent}`);
+        } else {
+            console.log(`[staff-mail] skipped-welcome-email reason=no-email username=${username}`);
         }
     } catch (err) {
-        console.error("SEND EMAIL FAIL:", err);
+        emailError = summarizeMailError(err);
+        console.error(`[staff-mail] welcome-email-failed to=${normalizeEmail(email) || '(none)'}`, {
+            mailError: emailError
+        });
     }
 
 
     return {
         ...accountPayload,
-        emailSent
+        emailSent,
+        emailError
     };
 };
 
@@ -284,19 +304,31 @@ exports.resetStaffPasswordApi = async (req, res) => {
         };
 
         let emailSent = false;
+        let emailError = '';
         if (user.email) {
             const loginUrl = buildLoginUrl();
-            emailSent = await sendEmail(
-                user.email,
-                'Mat khau BusDN da duoc dat lai',
-                buildResetPasswordEmailHtml({
-                    fullName: user.fullName,
-                    username,
-                    password,
-                    role: user.role,
-                    loginUrl
-                })
-            );
+            console.log(`[staff-mail] attempting-reset-email userId=${user._id} to=${normalizeEmail(user.email)} loginUrl=${loginUrl}`);
+            try {
+                emailSent = await sendEmail(
+                    user.email,
+                    'Mat khau BusDN da duoc dat lai',
+                    buildResetPasswordEmailHtml({
+                        fullName: user.fullName,
+                        username,
+                        password,
+                        role: user.role,
+                        loginUrl
+                    })
+                );
+                console.log(`[staff-mail] reset-email-result userId=${user._id} emailSent=${emailSent}`);
+            } catch (mailError) {
+                emailError = summarizeMailError(mailError);
+                console.error(`[staff-mail] reset-email-failed userId=${user._id} to=${normalizeEmail(user.email)}`, {
+                    mailError: emailError
+                });
+            }
+        } else {
+            console.log(`[staff-mail] skipped-reset-email userId=${user._id} reason=no-email`);
         }
 
         return res.json({
@@ -307,7 +339,8 @@ exports.resetStaffPasswordApi = async (req, res) => {
                     ? 'Mat khau moi da duoc gui qua email.'
                     : 'Mat khau moi da duoc tao nhung khong gui duoc email. Hay luu lai thong tin de gui thu cong.')
                 : 'Mat khau moi da duoc tao.',
-            account: accountPayload
+            account: accountPayload,
+            emailError
         });
     } catch (error) {
         console.error('Error resetting staff password:', error);

@@ -9,7 +9,7 @@ const {
     getPriorityDiscountPercentByCategory,
     resolveMonthlyPassBasePrice
 } = require("../services/fareMatrixService");
-const { resolvePublicBackendBaseUrl } = require("../utils/publicUrl");
+const { resolvePublicAbsoluteUrl, resolvePublicBackendBaseUrl } = require("../utils/publicUrl");
 
 const PASS_TYPE = {
     SINGLE_ROUTE: "SINGLE_ROUTE",
@@ -542,8 +542,11 @@ function getVnpayBaseConfig(req) {
     const tmnCode = process.env.VNPAY_TMN_CODE || "";
     const hashSecret = process.env.VNPAY_HASH_SECRET || "";
     const vnpUrl = process.env.VNPAY_URL || "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
-    const returnUrl = process.env.VNPAY_MONTHLY_RETURN_URL
-        || `${buildBaseUrl(req)}/api/user/passes/monthly/vnpay-return`;
+    const returnUrl = resolvePublicAbsoluteUrl(
+        req,
+        process.env.VNPAY_MONTHLY_RETURN_URL,
+        "/api/user/passes/monthly/vnpay-return"
+    );
     return { tmnCode, hashSecret, vnpUrl, returnUrl };
 }
 

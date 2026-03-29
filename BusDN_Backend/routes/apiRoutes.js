@@ -13,6 +13,7 @@ const { emitPendingPriorityCount, applyPriorityExpiryForUser } = require('../uti
 const scheduleController = require('../controllers/scheduleController'); // NEW
 const adminController = require('../controllers/adminController');
 const { getIO } = require('../config/socket');
+const { sendEmail } = require('../config/helpers');
 const { normalizeAvatarPath } = require('../utils/avatar');
 const {
     buildEmailRegex,
@@ -21,7 +22,7 @@ const {
     normalizePhone,
     normalizeText
 } = require('../utils/authIdentity');
-const { resolvePublicBackendBaseUrl } = require('../utils/publicUrl');
+const { resolvePublicAbsoluteUrl, resolvePublicBackendBaseUrl } = require('../utils/publicUrl');
 const importUpload = multer({ storage: multer.memoryStorage() });
 const VALID_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const VALID_PHONE_REGEX = /^(?:\+?84|0)\d{8,9}$/;
@@ -429,8 +430,11 @@ const getVnpayBaseConfig = (req) => ({
     tmnCode: process.env.VNPAY_TMN_CODE || '',
     hashSecret: process.env.VNPAY_HASH_SECRET || '',
     vnpUrl: process.env.VNPAY_URL || 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
-    returnUrl: process.env.VNPAY_MONTHLY_RETURN_URL
-        || `${buildBaseUrl(req)}/api/user/passes/monthly/vnpay-return`
+    returnUrl: resolvePublicAbsoluteUrl(
+        req,
+        process.env.VNPAY_MONTHLY_RETURN_URL,
+        '/api/user/passes/monthly/vnpay-return'
+    )
 });
 
 const signMomoRaw = (rawSignature, accessKey, secretKey) => crypto.createHmac('sha256', secretKey).update(rawSignature).digest('hex');
@@ -2203,8 +2207,16 @@ router.post('/user/passes/monthly/checkout', authMiddleware, async (req, res) =>
             const partnerCode = process.env.MOMO_PARTNER_CODE || '';
             const accessKey = process.env.MOMO_ACCESS_KEY || '';
             const secretKey = process.env.MOMO_SECRET_KEY || '';
-            const redirectUrl = process.env.MOMO_MONTHLY_RETURN_URL || `${buildBaseUrl(req)}/api/user/passes/monthly/momo-return`;
-            const ipnUrl = process.env.MOMO_MONTHLY_RETURN_URL || redirectUrl;
+            const redirectUrl = resolvePublicAbsoluteUrl(
+                req,
+                process.env.MOMO_MONTHLY_RETURN_URL,
+                '/api/user/passes/monthly/momo-return'
+            );
+            const ipnUrl = resolvePublicAbsoluteUrl(
+                req,
+                process.env.MOMO_MONTHLY_RETURN_URL,
+                '/api/user/passes/monthly/momo-return'
+            );
             const orderInfo = `Thanh toán vé tháng ${txnRef}`;
             const requestId = txnRef;
             const requestType = 'payWithMethod';
@@ -3223,6 +3235,7 @@ router.post('/admin/users/create', authMiddleware, async (req, res) => {
         const email = normalizeEmail(req.body.email);
         const phone = normalizePhone(req.body.phone);
         const role = normalizeText(req.body.role).toUpperCase();
+        console.log(`[admin-users] create-request adminId=${req.user.userId} email=${email || '(none)'} phone=${phone || '(none)'} role=${role || '(empty)'}`);
 
         if (!fullName || !role || (!email && !phone)) {
             return res.status(400).json({ ok: false, message: 'Vui lòng cung cấp đủ họ tên, vai trò và ít nhất SĐT hoặc Email' });
@@ -3263,12 +3276,58 @@ router.post('/admin/users/create', authMiddleware, async (req, res) => {
                 : (email
                     ? 'Tạo tài khoản thành công nhưng chưa gửi được email tự động.'
                     : 'Tạo tài khoản thành công. Cần gửi thông tin đăng nhập thủ công.'),
-            account: accountPayload
+            account: accountPayload,
+            emailError: accountPayload.emailError || ''
         });
 
     } catch (error) {
         console.error('Error creating admin user:', error);
         res.status(500).json({ ok: false, message: 'Lỗi server' });
+    }
+});
+
+router.post('/admin/test-email', authMiddleware, async (req, res) => {
+    try {
+        const adminUser = await User.findById(req.user.userId).select('role email fullName');
+        if (!adminUser || adminUser.role !== 'ADMIN') {
+            return res.status(403).json({ ok: false, message: 'Forbidden' });
+        }
+
+        const targetEmail = normalizeEmail(req.body?.to || adminUser.email);
+        if (!targetEmail || !VALID_EMAIL_REGEX.test(targetEmail)) {
+            return res.status(400).json({ ok: false, message: 'Email test khong hop le.' });
+        }
+
+        console.log(`[admin-test-email] request adminId=${req.user.userId} to=${targetEmail}`);
+
+        await sendEmail(
+            targetEmail,
+            'BusDN SMTP test',
+            `
+                <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+                    <h2>BusDN SMTP test</h2>
+                    <p>Xin chao ${normalizeText(adminUser.fullName) || 'Admin'},</p>
+                    <p>Neu ban nhan duoc email nay thi SMTP tren production dang hoat dong.</p>
+                    <p><strong>Thoi gian:</strong> ${new Date().toISOString()}</p>
+                </div>
+            `
+        );
+
+        return res.json({
+            ok: true,
+            message: `Da gui email test toi ${targetEmail}.`
+        });
+    } catch (error) {
+        console.error('[admin-test-email] failed', {
+            message: error?.message || 'Unknown error',
+            code: error?.code || null,
+            responseCode: error?.responseCode || null,
+            response: error?.response || null
+        });
+        return res.status(500).json({
+            ok: false,
+            message: error?.message || 'Gui email test that bai.'
+        });
     }
 });
 

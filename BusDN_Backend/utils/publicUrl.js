@@ -22,6 +22,21 @@ const normalizeOrigin = (value, { allowLoopback = false } = {}) => {
     }
 };
 
+const normalizeAbsoluteUrl = (value, { allowLoopback = false } = {}) => {
+    const raw = normalizeText(value);
+    if (!raw) return '';
+
+    try {
+        const parsed = new URL(raw);
+        if (!allowLoopback && isLoopbackHost(parsed.hostname)) {
+            return '';
+        }
+        return parsed.toString();
+    } catch {
+        return '';
+    }
+};
+
 const buildRequestOrigin = (req, { allowLoopback = false } = {}) => {
     if (!req) return '';
 
@@ -51,6 +66,16 @@ const resolvePublicBackendBaseUrl = (req) => {
     return buildRequestOrigin(req, { allowLoopback: true }) || 'http://localhost:3000';
 };
 
+const resolvePublicAbsoluteUrl = (req, explicitUrl, fallbackPath) => {
+    const allowLoopback = process.env.NODE_ENV !== 'production';
+    const normalizedExplicitUrl = normalizeAbsoluteUrl(explicitUrl, { allowLoopback });
+    if (normalizedExplicitUrl) return normalizedExplicitUrl;
+
+    const baseUrl = resolvePublicBackendBaseUrl(req);
+    return new URL(fallbackPath, `${baseUrl}/`).toString();
+};
+
 module.exports = {
+    resolvePublicAbsoluteUrl,
     resolvePublicBackendBaseUrl
 };
