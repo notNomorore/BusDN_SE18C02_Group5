@@ -17,18 +17,44 @@ const formatDate = (date) => {
 };
 const nodemailer = require('nodemailer');
 
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: process.env.EMAIL_USER, 
-        pass: process.env.EMAIL_PASS         
+let cachedTransporter = null;
+let cachedFromAddress = null;
+
+const getMailTransporter = () => {
+    if (cachedTransporter) {
+        return {
+            transporter: cachedTransporter,
+            from: cachedFromAddress
+        };
     }
-});
+
+    const emailUser = (process.env.EMAIL_USER || '').trim();
+    const emailPass = (process.env.EMAIL_PASS || '').trim();
+
+    if (!emailUser || !emailPass) {
+        throw new Error('Email service is not configured. Missing EMAIL_USER or EMAIL_PASS.');
+    }
+
+    cachedTransporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+            user: emailUser,
+            pass: emailPass
+        }
+    });
+    cachedFromAddress = process.env.EMAIL_FROM || `BusDN Admin <${emailUser}>`;
+
+    return {
+        transporter: cachedTransporter,
+        from: cachedFromAddress
+    };
+};
 
 const sendEmail = async (to, subject, htmlContent) => {
     try {
+        const { transporter, from } = getMailTransporter();
         await transporter.sendMail({
-            from: '"BusDN Admin" <nguyennhatminhnau@gmail.com>',
+            from,
             to,
             subject,
             html: htmlContent

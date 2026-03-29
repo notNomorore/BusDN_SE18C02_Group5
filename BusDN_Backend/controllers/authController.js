@@ -1,6 +1,5 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer');
 const { User } = require('../models/models');
 const { applyPriorityExpiryForUser } = require('../utils/priorityUtils');
 const { normalizeAvatarPath } = require('../utils/avatar');
@@ -12,30 +11,8 @@ const {
     normalizePhone,
     normalizeText
 } = require('../utils/authIdentity');
+const { sendEmail } = require('../config/helpers');
 require('dotenv').config();
-// Configure Nodemailer (Placeholder as requested, but functional if credentials provided)
-// For real testing, use Ethereal or a real service.
-const transporter = nodemailer.createTransport({
-    service: 'gmail', // or your service
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-    }
-});
-
-const sendEmail = async (to, subject, text) => {
-    try {
-        await transporter.sendMail({
-            from: '"BusDN Support" <nguyennhatminhnau@gmail.com>',
-            to,
-            subject,
-            text
-        });
-        console.log(`Email sent to ${to}`);
-    } catch (error) {
-        console.error('Error sending email:', error);
-    }
-};
 
 const generateOTP = () => {
     return Math.floor(100000 + Math.random() * 900000).toString();
@@ -52,24 +29,19 @@ exports.register = async (req, res) => {
             return res.status(400).json({ message: 'Missing required fields' });
         }
 
-        // Check if user exists
         let user = email ? await User.findOne({ email: buildEmailRegex(email) }) : null;
         if (!user && phone) {
             user = await User.findOne({ phone: { $in: buildPhoneVariants(phone) } });
         }
         if (user) {
-            return res.status(400).json({ message: 'Email đã tồn tại' });
+            return res.status(400).json({ message: 'Email already exists' });
         }
 
-        // Hash password
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
-
-        // Generate OTP
         const otp = generateOTP();
-        const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+        const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
 
-        // Create user
         user = new User({
             fullName,
             email: email || undefined,
@@ -83,16 +55,25 @@ exports.register = async (req, res) => {
 
         await user.save();
 
-        // Send OTP
-        await sendEmail(email, 'Mã xác thực BusDN', `Mã OTP của bạn là: ${otp}. Mã có hiệu lực trong 10 phút.`);
+        const emailSent = await sendEmail(
+            email,
+            'Ma xac thuc BusDN',
+            `<p>Ma OTP cua ban la: <strong>${otp}</strong>.</p><p>Ma co hieu luc trong 10 phut.</p>`
+        );
 
-        res.status(201).json({ message: 'OTP Sent', userId: user._id });
+        if (!emailSent) {
+            await User.deleteOne({ _id: user._id });
+            return res.status(502).json({
+                message: 'Khong the gui email xac thuc. Vui long thu lai sau.'
+            });
+        }
+
+        return res.status(201).json({ message: 'OTP Sent', userId: user._id });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ message: 'Lỗi Server' });
+        return res.status(500).json({ message: 'Loi Server' });
     }
 };
-
 exports.verifyOTP = async (req, res) => {
     try {
         const email = normalizeEmail(req.body.email);
@@ -195,7 +176,7 @@ exports.forgotPassword = async (req, res) => {
         const user = await User.findOne({ email: buildEmailRegex(email) });
 
         if (!user) {
-            return res.status(400).json({ message: 'Email không tồn tại' });
+            return res.status(400).json({ message: 'Email not found' });
         }
 
         const otp = generateOTP();
@@ -203,15 +184,27 @@ exports.forgotPassword = async (req, res) => {
         user.otp_expires = new Date(Date.now() + 10 * 60 * 1000);
         await user.save();
 
-        await sendEmail(email, 'Quên mật khẩu BusDN', `Mã OTP khôi phục mật khẩu của bạn là: ${otp}`);
+        const emailSent = await sendEmail(
+            email,
+            'Quen mat khau BusDN',
+            `<p>Ma OTP khoi phuc mat khau cua ban la: <strong>${otp}</strong></p>`
+        );
 
-        res.json({ message: 'OTP Sent' });
+        if (!emailSent) {
+            user.otp_code = undefined;
+            user.otp_expires = undefined;
+            await user.save();
+            return res.status(502).json({
+                message: 'Khong the gui email khoi phuc mat khau. Vui long thu lai sau.'
+            });
+        }
+
+        return res.json({ message: 'OTP Sent' });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ message: 'Lỗi Server' });
+        return res.status(500).json({ message: 'Loi Server' });
     }
 };
-
 exports.resetPassword = async (req, res) => {
     try {
         const email = normalizeEmail(req.body.email);

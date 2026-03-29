@@ -1,12 +1,11 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const nodemailer = require('nodemailer');
 const { User, PhoneVerification } = require('../models/models');
 const router = express.Router();
 const { checkPassword, PASS_ERR_MSG, sendEmail, generateOTP, generateResetToken } = require('../config/helpers');
 const { getAllRoutes, getRouteDetail, getRouteGeoJSON, getRouteLiveVehicles, getLiveFleetVehicles } = require('../controllers/routeController');
 const { applyPriorityExpiryForUser } = require('../utils/priorityUtils');
-const { buildLoginLookup } = require('../utils/authIdentity');
+const { buildLoginLookup, normalizeEmail } = require('../utils/authIdentity');
 require('dotenv').config();
 
 const getFirebaseConfig = () => ({
@@ -188,17 +187,16 @@ module.exports = (upload) => {
             const contactValueRaw = (req.body.contactValue || '').trim();
             if (!contactValueRaw) {
                 return res.render('register-step2', {
-                    error: 'Vui lòng nhập Email hoặc Số điện thoại.',
+                    error: 'Vui long nhap Email hoac So dien thoai.',
                     success: null,
                     contactValue: '',
                     firebaseConfig: getFirebaseConfig()
                 });
             }
 
-            const contactType = detectContactType(contactValueRaw);
-            if (contactType === 'PHONE') {
+            if (detectContactType(contactValueRaw) === 'PHONE') {
                 return res.render('register-step2', {
-                    error: 'Vui lòng xác thực số điện thoại bằng Firebase ở bước này.',
+                    error: 'Vui long su dung email cho luong dang ky nay.',
                     success: null,
                     contactValue: contactValueRaw,
                     firebaseConfig: getFirebaseConfig()
@@ -208,7 +206,7 @@ module.exports = (upload) => {
             const email = contactValueRaw.toLowerCase();
             if (!EMAIL_REGEX.test(email)) {
                 return res.render('register-step2', {
-                    error: 'Email không hợp lệ.',
+                    error: 'Email khong hop le.',
                     success: null,
                     contactValue: contactValueRaw,
                     firebaseConfig: getFirebaseConfig()
@@ -218,7 +216,7 @@ module.exports = (upload) => {
             const existingEmail = await User.findOne({ email });
             if (existingEmail) {
                 return res.render('register-step2', {
-                    error: 'Email đã tồn tại.',
+                    error: 'Email da ton tai.',
                     success: null,
                     contactValue: contactValueRaw,
                     firebaseConfig: getFirebaseConfig()
@@ -236,16 +234,27 @@ module.exports = (upload) => {
                 contactVerified: false
             });
 
-            await sendEmail(
+            const emailSent = await sendEmail(
                 email,
-                'BusDN - Mã OTP xác thực đăng ký',
-                `<p>Mã OTP của bạn là: <strong>${otp}</strong>. Hiệu lực trong 10 phút.</p>`
+                'BusDN - Ma OTP xac thuc dang ky',
+                `<p>Ma OTP cua ban la: <strong>${otp}</strong>. Hieu luc trong 10 phut.</p>`
             );
+
+            if (!emailSent) {
+                setRegData(req, { otpCode: null, otpExpires: null });
+                return res.render('register-step2', {
+                    error: 'Khong the gui email OTP. Vui long thu lai sau.',
+                    success: null,
+                    contactValue: contactValueRaw,
+                    firebaseConfig: getFirebaseConfig()
+                });
+            }
+
             return res.redirect('/verify-otp?type=registration');
         } catch (error) {
             console.error(error);
             return res.render('register-step2', {
-                error: 'Lỗi hệ thống.',
+                error: 'Loi he thong.',
                 success: null,
                 contactValue: req.body.contactValue || '',
                 firebaseConfig: getFirebaseConfig()
@@ -496,28 +505,58 @@ module.exports = (upload) => {
             if (type === 'registration') {
                 const regData = getRegData(req);
                 if (!regData.contactValue || regData.contactType !== 'EMAIL') {
-                    return res.json({ success: false, message: 'Phiên đăng ký không hợp lệ.' });
+                    return res.json({ success: false, message: 'Phien dang ky khong hop le.' });
                 }
+
                 const otp = generateOTP();
                 const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
                 setRegData(req, { otpCode: otp, otpExpires });
-                await sendEmail(regData.contactValue, 'Mã OTP mới - BusDN', `<p>Mã OTP mới của bạn: <strong>${otp}</strong></p>`);
-                return res.json({ success: true, message: 'Mã OTP mới đã được gửi!' });
+
+                const emailSent = await sendEmail(
+                    regData.contactValue,
+                    'Ma OTP moi - BusDN',
+                    `<p>Ma OTP moi cua ban la: <strong>${otp}</strong></p>`
+                );
+
+                if (!emailSent) {
+                    setRegData(req, { otpCode: null, otpExpires: null });
+                    return res.json({
+                        success: false,
+                        message: 'Khong the gui email OTP moi. Vui long thu lai sau.'
+                    });
+                }
+
+                return res.json({ success: true, message: 'Ma OTP moi da duoc gui!' });
             }
 
-            const user = await User.findOne({ email });
+            const normalizedEmail = normalizeEmail(email);
+            const user = await User.findOne({ email: normalizedEmail });
             if (!user) {
-                return res.json({ success: false, message: 'Email không tồn tại!' });
+                return res.json({ success: false, message: 'Email khong ton tai!' });
             }
 
             const otp = generateOTP();
             const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
             await User.findByIdAndUpdate(user._id, { otp_code: otp, otp_expires: otpExpires });
-            await sendEmail(email, 'Mã OTP mới - BusDN', `<p>Mã OTP mới của bạn: <strong>${otp}</strong></p>`);
-            return res.json({ success: true, message: 'Mã OTP mới đã được gửi!' });
+
+            const emailSent = await sendEmail(
+                normalizedEmail,
+                'Ma OTP moi - BusDN',
+                `<p>Ma OTP moi cua ban la: <strong>${otp}</strong></p>`
+            );
+
+            if (!emailSent) {
+                await User.findByIdAndUpdate(user._id, { otp_code: null, otp_expires: null });
+                return res.json({
+                    success: false,
+                    message: 'Khong the gui email OTP moi. Vui long thu lai sau.'
+                });
+            }
+
+            return res.json({ success: true, message: 'Ma OTP moi da duoc gui!' });
         } catch (err) {
             console.error(err);
-            return res.json({ success: false, message: 'Lỗi hệ thống' });
+            return res.json({ success: false, message: 'Loi he thong' });
         }
     });
 
@@ -543,57 +582,63 @@ module.exports = (upload) => {
         });
     });
 
-   router.post('/forgot-password', async (req, res) => {
-    try {
-        const { email } = req.body;
+    router.post('/forgot-password', async (req, res) => {
+        try {
+            const normalizedEmail = normalizeEmail(req.body.email);
 
-        if (!email) {
+            if (!normalizedEmail) {
+                return res.render('forgot-password', {
+                    error: 'Vui long nhap email!',
+                    success: null
+                });
+            }
+
+            const user = await User.findOne({ email: normalizedEmail });
+
+            if (user) {
+                const otp = generateOTP();
+                const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
+
+                await User.findByIdAndUpdate(user._id, {
+                    otp_code: otp,
+                    otp_expires: otpExpires,
+                    resetToken: null
+                });
+
+                const emailSent = await sendEmail(
+                    normalizedEmail,
+                    'Khoi phuc mat khau - Ma OTP',
+                    `<div style="font-family: Arial; text-align: center;">
+                        <h2>Ma xac thuc cua ban la:</h2>
+                    <h1 style="color: #003366; letter-spacing: 5px;">${otp}</h1>
+                        <p>Ma co hieu luc trong 10 phut.</p>
+                    </div>`
+                );
+
+                if (!emailSent) {
+                    await User.findByIdAndUpdate(user._id, {
+                        otp_code: null,
+                        otp_expires: null,
+                        resetToken: null
+                    });
+                    return res.render('forgot-password', {
+                        error: 'Khong the gui email OTP. Vui long thu lai sau.',
+                        success: null
+                    });
+                }
+            }
+
+            const successMsg = encodeURIComponent('Neu email ton tai, ma OTP da duoc gui thanh cong!');
+            return res.redirect('/verify-otp?email=' + encodeURIComponent(normalizedEmail) + '&type=forgot-password&success=' + successMsg);
+
+        } catch (err) {
+            console.error('Loi Forgot Password:', err);
             return res.render('forgot-password', {
-                error: 'Vui lòng nhập email!',
+                error: 'Da co loi xay ra, vui long thu lai sau.',
                 success: null
             });
         }
-
-        const user = await User.findOne({ email });
-
-        // Logic bảo mật: Luôn redirect sang trang OTP dù email đúng hay sai
-        // để kẻ xấu không dùng chức năng này để dò tìm danh sách email người dùng.
-        if (user) {
-            // 1. Tạo OTP
-            const otp = generateOTP();
-            const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 phút
-
-            // 2. Cập nhật User (Xóa luôn mật khẩu tạm cũ nếu có để tránh xung đột)
-            await User.findByIdAndUpdate(user._id, {
-                otp_code: otp,
-                otp_expires: otpExpires,
-                resetToken: null // Xóa token cũ nếu có
-            });
-
-            // 3. Gửi Email (Bất đồng bộ - không dùng await nếu muốn tốc độ nhanh hơn, 
-            // nhưng nên dùng để đảm bảo mail đã gửi trước khi chuyển trang)
-            await sendEmail(email, 'Khôi phục mật khẩu - Mã OTP', 
-                `<div style="font-family: Arial; text-align: center;">
-                    <h2>Mã xác thực của bạn là:</h2>
-                    <h1 style="color: #003366; letter-spacing: 5px;">${otp}</h1>
-                    <p>Mã có hiệu lực trong 10 phút.</p>
-                </div>`
-            );
-        }
-
-        // CHỐT: Chuyển hướng ngay lập tức (Xử lý lỗi ERR_HTTP_HEADERS_SENT)
-        // Dùng redirect thay vì render để trình duyệt "sang trang mới" hẳn hoi.
-        const successMsg = encodeURIComponent('Nếu email tồn tại, mã OTP đã được gửi thành công!');
-        return res.redirect(`/verify-otp?email=${encodeURIComponent(email)}&type=forgot-password&success=${successMsg}`);
-
-    } catch (err) {
-        console.error("Lỗi Forgot Password:", err);
-        return res.render('forgot-password', {
-            error: 'Đã có lỗi xảy ra, vui lòng thử lại sau.',
-            success: null
-        });
-    }
-});
+    });
 
     // --- RESET PASSWORD ---
     router.get('/reset-password', async (req, res) => {
