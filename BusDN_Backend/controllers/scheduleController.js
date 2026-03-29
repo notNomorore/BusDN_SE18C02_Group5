@@ -3,26 +3,37 @@ const { getIO } = require('../config/socket');
 const sb = require('../utils/scheduleBusiness');
 
 const GPS_STALE_MS = 60 * 1000;
+const START_EARLY_ALLOWANCE_MINUTES = 10;
 const gpsAlertedSchedules = new Map();
 
 function emitScheduleChange(action, scheduleDoc) {
     const io = getIO();
     if (!io) return;
+    const routeId = scheduleDoc.routeId?._id || scheduleDoc.routeId;
+    const busId = scheduleDoc.busId?._id || scheduleDoc.busId;
+    const driverId = scheduleDoc.driverId?._id || scheduleDoc.driverId;
+    const conductorId = scheduleDoc.conductorId?._id || scheduleDoc.conductorId;
     const payload = {
         action,
         scheduleId: String(scheduleDoc._id),
-        routeId: String(scheduleDoc.routeId?._id || scheduleDoc.routeId),
+        routeId: String(routeId || ''),
         date: scheduleDoc.date,
         status: scheduleDoc.status,
         departureTime: scheduleDoc.departureTime || null,
+        actualStart: scheduleDoc.actualStart || null,
+        actualEnd: scheduleDoc.actualEnd || null,
+        routeNumber: scheduleDoc.routeId?.routeNumber || '',
+        routeName: scheduleDoc.routeId?.name || '',
+        busId: String(busId || ''),
+        licensePlate: scheduleDoc.busId?.licensePlate || '',
+        driverId: String(driverId || ''),
+        driverName: scheduleDoc.driverId?.fullName || '',
     };
     io.to('role:DRIVER').emit('schedule:changed', payload);
     io.to('role:CONDUCTOR').emit('schedule:changed', payload);
     io.to('admins').emit('schedule:changed', payload);
-    const dId = scheduleDoc.driverId?._id || scheduleDoc.driverId;
-    const cId = scheduleDoc.conductorId?._id || scheduleDoc.conductorId;
-    if (dId) io.to(`user:${dId}`).emit('schedule:changed', payload);
-    if (cId) io.to(`user:${cId}`).emit('schedule:changed', payload);
+    if (driverId) io.to(`user:${driverId}`).emit('schedule:changed', payload);
+    if (conductorId) io.to(`user:${conductorId}`).emit('schedule:changed', payload);
 }
 
 function emitTrackingUpdate(scheduleDoc) {
@@ -133,6 +144,23 @@ function currentTimeHHMM() {
     return new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 }
 
+function dateOnlyISO(value) {
+    if (!value) return '';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toISOString().slice(0, 10);
+}
+
+function minutesUntilPlannedStart(scheduleDoc, now = new Date()) {
+    const plannedTime = scheduleDoc?.departureTime || scheduleDoc?.shiftTime?.start;
+    const scheduleDay = dateOnlyISO(scheduleDoc?.date);
+    if (!plannedTime || !scheduleDay) return null;
+
+    const planned = new Date(`${scheduleDay}T${plannedTime}:00`);
+    if (Number.isNaN(planned.getTime())) return null;
+    return Math.round((planned.getTime() - now.getTime()) / 60000);
+}
+
 async function populateScheduleDetail(scheduleId) {
     return Schedule.findById(scheduleId)
         .populate('driverId', 'fullName phone email avatar role')
@@ -165,9 +193,21 @@ async function validateScheduleCanStart(scheduleDoc, userId) {
     if (!canControlSchedule(scheduleDoc, userId)) return 'Khong co quyen bat dau chuyen nay';
     if (scheduleDoc.status === 'CANCELLED') return 'Chuyen da bi huy';
     if (scheduleDoc.status === 'COMPLETED' || scheduleDoc.actualEnd) return 'Chuyen da ket thuc';
+    if (scheduleDoc.status === 'IN_PROGRESS') return null;
 
     if (!scheduleDoc.busId) return 'Chuyen chua duoc gan xe';
     if (!scheduleDoc.driverId) return 'Chuyen chua duoc phan cong tai xe';
+
+    const today = dateOnlyISO(new Date());
+    const scheduleDay = dateOnlyISO(scheduleDoc.date);
+    if (!scheduleDay) return 'Ngay chuyen khong hop le';
+    if (scheduleDay > today) return 'Chua den ngay cua chuyen';
+    if (scheduleDay < today) return 'Chuyen nay da qua ngay, hay ket thuc chuyen dang mo truoc';
+
+    const minsUntilStart = minutesUntilPlannedStart(scheduleDoc);
+    if (minsUntilStart != null && minsUntilStart > START_EARLY_ALLOWANCE_MINUTES) {
+        return `Chua den gio bat dau chuyen (chi duoc som toi da ${START_EARLY_ALLOWANCE_MINUTES} phut)`;
+    }
 
     const bus = await Bus.findById(scheduleDoc.busId).select('status');
     if (!bus) return 'Khong tim thay xe duoc gan cho chuyen';
@@ -778,11 +818,22 @@ exports.createSchedule = async (req, res) => {
         const CAP_END = '19:30';
         const capM = sb.toMinutes(CAP_END);
         const endM = sb.toMinutes(normalizedShiftEnd);
+        const startM = sb.toMinutes(normalizedShiftStart);
+        const depM = sb.toMinutes(departureTime || normalizedShiftStart);
+        if (startM == null || endM == null) {
+            return res.status(400).json({ ok: false, message: 'Ca lam khong hop le' });
+        }
+        if (endM <= startM) {
+            return res.status(400).json({ ok: false, message: 'Gio ket thuc ca phai sau gio bat dau' });
+        }
         if (capM != null && endM != null && endM > capM) {
             return res.status(400).json({
                 ok: false,
                 message: `Giờ kết thúc ca không được vượt quá ${CAP_END}.`,
             });
+        }
+        if (depM != null && (depM < startM || depM >= endM)) {
+            return res.status(400).json({ ok: false, message: 'Gio xuat ben phai nam trong khoang ca lam' });
         }
 
         const rt = Number(route.roundTripMinutes) || 60;
@@ -913,11 +964,22 @@ exports.updateSchedule = async (req, res) => {
         const CAP_END = '19:30';
         const capM = sb.toMinutes(CAP_END);
         const endM = sb.toMinutes(candidate.shiftTime?.end);
+        const startM = sb.toMinutes(candidate.shiftTime?.start);
+        const depM = sb.toMinutes(candidate.departureTime || candidate.shiftTime?.start);
+        if (startM == null || endM == null) {
+            return res.status(400).json({ ok: false, message: 'Ca lam khong hop le' });
+        }
+        if (endM <= startM) {
+            return res.status(400).json({ ok: false, message: 'Gio ket thuc ca phai sau gio bat dau' });
+        }
         if (capM != null && endM != null && endM > capM) {
             return res.status(400).json({
                 ok: false,
                 message: `Giờ kết thúc ca không được vượt quá ${CAP_END}.`,
             });
+        }
+        if (depM != null && (depM < startM || depM >= endM)) {
+            return res.status(400).json({ ok: false, message: 'Gio xuat ben phai nam trong khoang ca lam' });
         }
 
         const dayList = await loadSchedulesForDay(candidate.date, id);

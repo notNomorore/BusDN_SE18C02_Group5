@@ -328,9 +328,14 @@ const getRouteLiveVehicles = async (req, res) => {
 
         const schedules = await Schedule.find({
             routeId,
-            date: { $gte: start, $lte: end },
             archived: { $ne: true },
-            status: { $in: ['SCHEDULED', 'IN_PROGRESS'] }
+            $or: [
+                { status: 'IN_PROGRESS' },
+                {
+                    date: { $gte: start, $lte: end },
+                    status: { $in: ['SCHEDULED', 'IN_PROGRESS'] }
+                }
+            ]
         })
             .populate('routeId', 'routeNumber name')
             .populate('busId', 'licensePlate capacity')
@@ -372,11 +377,20 @@ const getLiveFleetVehicles = async (req, res) => {
         end.setHours(23, 59, 59, 999);
 
         const scheduleFilter = {
-            date: { $gte: start, $lte: end },
             archived: { $ne: true }
         };
         if (routeId) scheduleFilter.routeId = routeId;
-        scheduleFilter.status = onlyRunning ? 'IN_PROGRESS' : { $in: ['SCHEDULED', 'IN_PROGRESS'] };
+        if (onlyRunning) {
+            scheduleFilter.status = 'IN_PROGRESS';
+        } else {
+            scheduleFilter.$or = [
+                { status: 'IN_PROGRESS' },
+                {
+                    date: { $gte: start, $lte: end },
+                    status: { $in: ['SCHEDULED', 'IN_PROGRESS'] }
+                }
+            ];
+        }
 
         const schedules = await Schedule.find(scheduleFilter)
             .populate('routeId', 'routeNumber name')

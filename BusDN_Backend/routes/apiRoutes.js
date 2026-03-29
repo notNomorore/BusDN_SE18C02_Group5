@@ -50,6 +50,21 @@ const PAYMENT_METHOD = {
     MOMO: 'MOMO'
 };
 
+const MAP_TILE_PROVIDERS = [
+    {
+        key: 'osm',
+        buildUrl: ({ z, x, y }) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`
+    },
+    {
+        key: 'carto-light',
+        buildUrl: ({ z, x, y }) => `https://a.basemaps.cartocdn.com/light_all/${z}/${x}/${y}.png`
+    },
+    {
+        key: 'esri-street',
+        buildUrl: ({ z, x, y }) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/${z}/${y}/${x}`
+    }
+];
+
 async function getRouteDeactivationBlockers(routeId) {
     const activeSchedules = await Schedule.find({
         routeId,
@@ -139,6 +154,42 @@ async function validateStopDeactivation(stopId) {
     const suffix = blockers.relatedRoutes.length > 3 ? '...' : '';
     return `Không thể tạm ngưng trạm này vì vẫn đang được dùng trong ${blockers.relatedRoutes.length} tuyến: ${routePreview}${suffix}`;
 }
+
+router.get('/map-tiles/:z/:x/:y', async (req, res) => {
+    const z = Number.parseInt(req.params.z, 10);
+    const x = Number.parseInt(req.params.x, 10);
+    const y = Number.parseInt(req.params.y, 10);
+
+    if (![z, x, y].every(Number.isInteger) || z < 0 || x < 0 || y < 0) {
+        return res.status(400).json({ message: 'Invalid tile coordinates.' });
+    }
+
+    for (const provider of MAP_TILE_PROVIDERS) {
+        try {
+            const upstream = await fetch(provider.buildUrl({ z, x, y }), {
+                headers: {
+                    'User-Agent': 'BusDN/1.0 tile-proxy'
+                }
+            });
+
+            if (!upstream.ok) {
+                throw new Error(`Upstream ${provider.key} responded ${upstream.status}`);
+            }
+
+            const contentType = upstream.headers.get('content-type') || 'image/png';
+            const cacheControl = upstream.headers.get('cache-control') || 'public, max-age=86400';
+            const payload = Buffer.from(await upstream.arrayBuffer());
+
+            res.setHeader('Content-Type', contentType);
+            res.setHeader('Cache-Control', cacheControl);
+            return res.status(200).send(payload);
+        } catch (error) {
+            console.warn(`Map tile proxy failed for ${provider.key}:`, error.message);
+        }
+    }
+
+    return res.status(502).json({ message: 'Unable to load map tile from upstream providers.' });
+});
 
 const ensureAdminApi = async (req, res) => {
     const adminUser = await User.findById(req.user.userId).select('role');
