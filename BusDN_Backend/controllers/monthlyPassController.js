@@ -9,6 +9,7 @@ const {
     getPriorityDiscountPercentByCategory,
     resolveMonthlyPassBasePrice
 } = require("../services/fareMatrixService");
+const { resolvePublicBackendBaseUrl } = require("../utils/publicUrl");
 
 const PASS_TYPE = {
     SINGLE_ROUTE: "SINGLE_ROUTE",
@@ -447,7 +448,7 @@ function pageRedirectWithMsg(type, msg, extra = {}) {
 }
 
 function buildBaseUrl(req) {
-    return process.env.APP_BASE_URL || `${req.protocol}://${req.get("host")}`;
+    return resolvePublicBackendBaseUrl(req);
 }
 
 function toOrderCode() {

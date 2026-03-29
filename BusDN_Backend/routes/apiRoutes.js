@@ -21,6 +21,7 @@ const {
     normalizePhone,
     normalizeText
 } = require('../utils/authIdentity');
+const { resolvePublicBackendBaseUrl } = require('../utils/publicUrl');
 const importUpload = multer({ storage: multer.memoryStorage() });
 const VALID_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const VALID_PHONE_REGEX = /^(?:\+?84|0)\d{8,9}$/;
@@ -331,7 +332,7 @@ const mapPromotionPayloadFromApi = (body = {}) => {
 
 const parsePaymentMethod = (value) => (value === PAYMENT_METHOD.MOMO ? PAYMENT_METHOD.MOMO : PAYMENT_METHOD.VNPAY);
 
-const buildBaseUrl = (req) => process.env.APP_BASE_URL || `${req.protocol}://${req.get('host')}`;
+const buildBaseUrl = (req) => resolvePublicBackendBaseUrl(req);
 const buildFrontendBaseUrl = () => (
     process.env.FRONTEND_URL
     || process.env.FRONTEND_BASE_URL
