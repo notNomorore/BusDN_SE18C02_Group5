@@ -3,7 +3,7 @@ const XLSX = require('xlsx');
 const { User } = require('../models/models');
 const { sendEmail } = require('../config/helpers');
 const { renderAdmin } = require('../middleware/renderAdmin');
-const { buildFrontendLoginUrl } = require('../utils/authIdentity');
+const { buildEmailRegex, buildFrontendLoginUrl, buildPhoneVariants } = require('../utils/authIdentity');
 
 const STAFF_ROLES = ['DRIVER', 'CONDUCTOR'];
 
@@ -226,17 +226,29 @@ const createStaffRecord = async ({ fullName, email, phone, role, req }) => {
         password
     };
 
-    if (email) {
-        const loginUrl = buildLoginUrl();
-        await sendEmail(
-            email,
-            'Tai khoan BusDN da duoc tao',
-            buildWelcomeEmailHtml({ fullName, username, password, role, loginUrl })
-        );
+    let emailSent = false;
+
+    try {
+        if (email && email.trim() !== "") {
+            const loginUrl = buildLoginUrl();
+            emailSent = await sendEmail(
+                email,
+                'Tai khoan BusDN da duoc tao',
+                buildWelcomeEmailHtml({ fullName, username, password, role, loginUrl })
+            );
+        }
+    } catch (err) {
+        console.error("SEND EMAIL FAIL:", err);
     }
 
-    return accountPayload;
+
+    return {
+        ...accountPayload,
+        emailSent
+    };
 };
+
+exports.createStaffRecord = createStaffRecord;
 
 exports.resetStaffPasswordApi = async (req, res) => {
     try {
@@ -271,9 +283,10 @@ exports.resetStaffPasswordApi = async (req, res) => {
             password
         };
 
+        let emailSent = false;
         if (user.email) {
             const loginUrl = buildLoginUrl();
-            await sendEmail(
+            emailSent = await sendEmail(
                 user.email,
                 'Mat khau BusDN da duoc dat lai',
                 buildResetPasswordEmailHtml({
@@ -284,19 +297,16 @@ exports.resetStaffPasswordApi = async (req, res) => {
                     loginUrl
                 })
             );
-
-            return res.json({
-                ok: true,
-                emailSent: true,
-                message: 'Mat khau moi da duoc gui qua email.',
-                account: accountPayload
-            });
         }
 
         return res.json({
             ok: true,
-            emailSent: false,
-            message: 'Mat khau moi da duoc tao.',
+            emailSent,
+            message: user.email
+                ? (emailSent
+                    ? 'Mat khau moi da duoc gui qua email.'
+                    : 'Mat khau moi da duoc tao nhung khong gui duoc email. Hay luu lai thong tin de gui thu cong.')
+                : 'Mat khau moi da duoc tao.',
             account: accountPayload
         });
     } catch (error) {
@@ -381,7 +391,7 @@ const processStaffImportRows = async ({ req, rows }) => {
     let imported = 0;
     let failed = 0;
     const failures = [];
-    const phoneOnlyAccounts = [];
+    const manualAccounts = [];
     const pendingByEmail = new Map();
     const pendingByPhone = new Map();
 
@@ -536,8 +546,8 @@ const processStaffImportRows = async ({ req, rows }) => {
             if (email) pendingByEmail.set(email, { row: rowIndex, account: pendingSnapshot });
             if (phone) pendingByPhone.set(phone, { row: rowIndex, account: pendingSnapshot });
 
-            if (!email) {
-                phoneOnlyAccounts.push(accountPayload);
+            if (!accountPayload.emailSent) {
+                manualAccounts.push(accountPayload);
             }
         } catch (error) {
             failed += 1;
@@ -605,7 +615,8 @@ const processStaffImportRows = async ({ req, rows }) => {
         imported,
         failed,
         failures,
-        phoneOnlyAccounts
+        manualAccounts,
+        phoneOnlyAccounts: manualAccounts
     };
 };
 
@@ -685,6 +696,22 @@ exports.createStaff = async (req, res) => {
             });
         }
 
+        if (email && !isValidEmail(email)) {
+            return await renderAdmin(req, res, 'admin/staff-create', 'Tao Tai khoan Nhan vien', {
+                error: 'Email khong hop le.',
+                success: null,
+                path: 'staff-list'
+            });
+        }
+
+        if (phone && !isValidPhone(phone)) {
+            return await renderAdmin(req, res, 'admin/staff-create', 'Tao Tai khoan Nhan vien', {
+                error: 'So dien thoai khong hop le.',
+                success: null,
+                path: 'staff-list'
+            });
+        }
+
         if (!STAFF_ROLES.includes(role)) {
             return await renderAdmin(req, res, 'admin/staff-create', 'Tao Tai khoan Nhan vien', {
                 error: 'Role chi co the la DRIVER hoac CONDUCTOR.',
@@ -694,7 +721,7 @@ exports.createStaff = async (req, res) => {
         }
 
         if (email) {
-            const existingByEmail = await User.findOne({ email });
+            const existingByEmail = await User.findOne({ email: buildEmailRegex(email) });
             if (existingByEmail) {
                 return await renderAdmin(req, res, 'admin/staff-create', 'Tao Tai khoan Nhan vien', {
                     error: 'Email da ton tai trong he thong.',
@@ -705,7 +732,7 @@ exports.createStaff = async (req, res) => {
         }
 
         if (phone) {
-            const existingByPhone = await User.findOne({ phone });
+            const existingByPhone = await User.findOne({ phone: { $in: buildPhoneVariants(phone) } });
             if (existingByPhone) {
                 return await renderAdmin(req, res, 'admin/staff-create', 'Tao Tai khoan Nhan vien', {
                     error: 'So dien thoai da ton tai trong he thong.',
@@ -716,15 +743,20 @@ exports.createStaff = async (req, res) => {
         }
 
         const accountPayload = await createStaffRecord({ fullName, email, phone, role, req });
+        const requiresManualDelivery = !accountPayload.emailSent;
         req.session.staffOnboardingInfo = {
             source: 'single',
-            summary: 'Tao tai khoan thanh cong.',
-            accounts: email ? [] : [accountPayload]
+            summary: requiresManualDelivery
+                ? 'Tao tai khoan thanh cong. Can gui thong tin thu cong.'
+                : 'Tao tai khoan thanh cong. Email thong tin dang nhap da duoc gui.',
+            accounts: requiresManualDelivery ? [accountPayload] : []
         };
 
-        const successMessage = email
+        const successMessage = accountPayload.emailSent
             ? 'Tai khoan duoc tao thanh cong va email thong tin dang nhap da duoc gui.'
-            : 'Tai khoan duoc tao thanh cong. Hay sao chep thong tin dang nhap de gui qua Zalo/SMS.';
+            : (email
+                ? 'Tai khoan duoc tao thanh cong nhung khong gui duoc email. Hay luu lai thong tin de gui thu cong.'
+                : 'Tai khoan duoc tao thanh cong. Hay sao chep thong tin dang nhap de gui thu cong.');
 
         return res.redirect('/admin/staff?success=' + encodeURIComponent(successMessage));
     } catch (error) {
@@ -753,21 +785,24 @@ exports.importStaff = async (req, res) => {
             return res.redirect('/admin/staff?error=' + encodeURIComponent('File khong co du lieu hop le.'));
         }
 
-        const { imported, failed, failures, phoneOnlyAccounts } = await processStaffImportRows({ req, rows });
+        const { imported, failed, failures, manualAccounts } = await processStaffImportRows({ req, rows });
 
         req.session.staffOnboardingInfo = {
             source: 'bulk',
-            summary: `Imported ${imported}, Failed ${failed}.`,
-            accounts: phoneOnlyAccounts,
+            summary: manualAccounts.length
+                ? `Imported ${imported}, Failed ${failed}. ${manualAccounts.length} tai khoan can gui thu cong.`
+                : `Imported ${imported}, Failed ${failed}.`,
+            accounts: manualAccounts,
             failures
         };
 
         const resultText = `Imported ${imported}, Failed ${failed}`;
+        const manualText = manualAccounts.length ? ` | ${manualAccounts.length} tai khoan can gui thu cong` : '';
         const noteText = failures.length
             ? ` | Chi tiet loi: ${failures.slice(0, 5).map(formatImportFailureForFlash).join(' ; ')}${failures.length > 5 ? ' ...' : ''}`
             : '';
 
-        return res.redirect('/admin/staff?success=' + encodeURIComponent(resultText + noteText));
+        return res.redirect('/admin/staff?success=' + encodeURIComponent(resultText + manualText + noteText));
     } catch (error) {
         console.error('Error importing staff:', error);
         return res.redirect('/admin/staff?error=' + encodeURIComponent('Import that bai: ' + (error.message || 'Loi he thong')));
@@ -790,15 +825,16 @@ exports.importStaffApi = async (req, res) => {
             return res.status(400).json({ ok: false, message: 'File không có dữ liệu hợp lệ.' });
         }
 
-        const { imported, failed, failures, phoneOnlyAccounts } = await processStaffImportRows({ req, rows });
+        const { imported, failed, failures, manualAccounts } = await processStaffImportRows({ req, rows });
 
         return res.json({
             ok: true,
             imported,
             failed,
             failures,
-            phoneOnlyAccounts,
-            message: `Imported ${imported}, Failed ${failed}`
+            manualAccounts,
+            phoneOnlyAccounts: manualAccounts,
+            message: `Imported ${imported}, Failed ${failed}${manualAccounts.length ? `, ${manualAccounts.length} tai khoan can gui thu cong` : ''}`
         });
     } catch (error) {
         console.error('Error importing staff via API:', error);

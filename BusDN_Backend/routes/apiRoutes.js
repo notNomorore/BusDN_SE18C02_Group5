@@ -22,6 +22,9 @@ const {
     normalizeText
 } = require('../utils/authIdentity');
 const importUpload = multer({ storage: multer.memoryStorage() });
+const VALID_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const VALID_PHONE_REGEX = /^(?:\+?84|0)\d{8,9}$/;
+const STAFF_ACCOUNT_ROLES = ['DRIVER', 'CONDUCTOR'];
 const {
     getFareMatrix,
     getPriorityDiscountPercentByCategory,
@@ -3221,53 +3224,50 @@ router.post('/admin/users/create', authMiddleware, async (req, res) => {
         const role = normalizeText(req.body.role).toUpperCase();
 
         if (!fullName || !role || (!email && !phone)) {
-            return res.status(400).json({ ok: false, message: 'Vui lÃ²ng cung cáº¥p Ä‘á»§ há» tÃªn, vai trÃ² vÃ  Ã­t nháº¥t SÄT hoáº·c Email' });
+            return res.status(400).json({ ok: false, message: 'Vui lòng cung cấp đủ họ tên, vai trò và ít nhất SĐT hoặc Email' });
         }
 
-        // Check if existing
+        if (email && !VALID_EMAIL_REGEX.test(email)) {
+            return res.status(400).json({ ok: false, message: 'Email không hợp lệ' });
+        }
+        if (phone && !VALID_PHONE_REGEX.test(phone)) {
+            return res.status(400).json({ ok: false, message: 'Số điện thoại không hợp lệ' });
+        }
+        if (!STAFF_ACCOUNT_ROLES.includes(role)) {
+            return res.status(400).json({ ok: false, message: 'Vai trò chỉ có thể là DRIVER hoặc CONDUCTOR' });
+        }
+
         if (email) {
             const existingByEmail = await User.findOne({ email: buildEmailRegex(email) });
-            if (existingByEmail) return res.status(400).json({ ok: false, message: 'Email Ä‘Ã£ tá»“n táº¡i' });
+            if (existingByEmail) return res.status(400).json({ ok: false, message: 'Email đã tồn tại' });
         }
         if (phone) {
             const existingByPhone = await User.findOne({ phone: { $in: buildPhoneVariants(phone) } });
-            if (existingByPhone) return res.status(400).json({ ok: false, message: 'Sá»‘ Ä‘iá»‡n thoáº¡i Ä‘Ã£ tá»“n táº¡i' });
+            if (existingByPhone) return res.status(400).json({ ok: false, message: 'Số điện thoại đã tồn tại' });
         }
 
-        // Just creating a dummy pass for now, realistically this imports adminController logic
-        const password = Math.random().toString(36).slice(-8);
-        const hashedPassword = await bcrypt.hash(password, await bcrypt.genSalt(10));
-
-        const user = new User({
+        const accountPayload = await adminController.createStaffRecord({
             fullName,
-            email: email || undefined,
-            phone: phone || undefined,
+            email,
+            phone,
             role,
-            password: hashedPassword,
-            isVerified: true,
-            isLocked: false,
-            status: 'ACTIVE',
-            isFirstLogin: true
+            req
         });
 
-        await user.save();
-
-        res.json({
+        return res.json({
             ok: true,
-            message: 'Táº¡o tÃ i khoáº£n thÃ nh cÃ´ng',
-            account: {
-                fullName,
-                email: email || '',
-                phone: phone || '',
-                role,
-                username: email || phone,
-                password // Return generated password to display to Admin
-            }
+            emailSent: Boolean(accountPayload.emailSent),
+            message: accountPayload.emailSent
+                ? 'Tạo tài khoản thành công. Thông tin đăng nhập đã được gửi qua email.'
+                : (email
+                    ? 'Tạo tài khoản thành công nhưng chưa gửi được email tự động.'
+                    : 'Tạo tài khoản thành công. Cần gửi thông tin đăng nhập thủ công.'),
+            account: accountPayload
         });
 
     } catch (error) {
         console.error('Error creating admin user:', error);
-        res.status(500).json({ ok: false, message: 'Lá»—i server' });
+        res.status(500).json({ ok: false, message: 'Lỗi server' });
     }
 });
 
