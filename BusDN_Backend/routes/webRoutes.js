@@ -6,6 +6,7 @@ const router = express.Router();
 const { checkPassword, PASS_ERR_MSG, sendEmail, generateOTP, generateResetToken } = require('../config/helpers');
 const { getAllRoutes, getRouteDetail, getRouteGeoJSON, getRouteLiveVehicles, getLiveFleetVehicles } = require('../controllers/routeController');
 const { applyPriorityExpiryForUser } = require('../utils/priorityUtils');
+const { buildLoginLookup } = require('../utils/authIdentity');
 require('dotenv').config();
 
 const getFirebaseConfig = () => ({
@@ -46,14 +47,19 @@ module.exports = (upload) => {
 
     router.post('/login', async (req, res) => {
         try {
-            const identifier = (req.body.email || '').trim();
+            const lookup = buildLoginLookup(req.body.identifier || req.body.email || req.body.phone || '');
             const { password } = req.body;
-            const user = await User.findOne({
-                $or: [
-                    { email: identifier.toLowerCase() },
-                    { phone: identifier }
-                ]
-            });
+            const query = [];
+
+            if (lookup?.emailRegex) {
+                query.push({ email: lookup.emailRegex });
+            }
+
+            if (lookup?.phoneVariants?.length) {
+                query.push({ phone: { $in: lookup.phoneVariants } });
+            }
+
+            const user = query.length ? await User.findOne({ $or: query }) : null;
 
             if (!user || !(await bcrypt.compare(password, user.password))) {
                 return res.render('admin/login', { error: 'Sai email hoặc mật khẩu!', success: null });

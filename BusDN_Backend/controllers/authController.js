@@ -4,6 +4,14 @@ const nodemailer = require('nodemailer');
 const { User } = require('../models/models');
 const { applyPriorityExpiryForUser } = require('../utils/priorityUtils');
 const { normalizeAvatarPath } = require('../utils/avatar');
+const {
+    buildEmailRegex,
+    buildLoginLookup,
+    buildPhoneVariants,
+    normalizeEmail,
+    normalizePhone,
+    normalizeText
+} = require('../utils/authIdentity');
 require('dotenv').config();
 // Configure Nodemailer (Placeholder as requested, but functional if credentials provided)
 // For real testing, use Ethereal or a real service.
@@ -35,10 +43,20 @@ const generateOTP = () => {
 
 exports.register = async (req, res) => {
     try {
-        const { fullName, email, phone, password } = req.body;
+        const fullName = normalizeText(req.body.fullName);
+        const email = normalizeEmail(req.body.email);
+        const phone = normalizePhone(req.body.phone);
+        const { password } = req.body;
+
+        if (!fullName || !password || !email) {
+            return res.status(400).json({ message: 'Missing required fields' });
+        }
 
         // Check if user exists
-        let user = await User.findOne({ email });
+        let user = email ? await User.findOne({ email: buildEmailRegex(email) }) : null;
+        if (!user && phone) {
+            user = await User.findOne({ phone: { $in: buildPhoneVariants(phone) } });
+        }
         if (user) {
             return res.status(400).json({ message: 'Email đã tồn tại' });
         }
@@ -54,8 +72,8 @@ exports.register = async (req, res) => {
         // Create user
         user = new User({
             fullName,
-            email,
-            phone,
+            email: email || undefined,
+            phone: phone || undefined,
             password: hashedPassword,
             otp_code: otp,
             otp_expires: otpExpires,
@@ -77,8 +95,12 @@ exports.register = async (req, res) => {
 
 exports.verifyOTP = async (req, res) => {
     try {
-        const { email, otp } = req.body;
-        const user = await User.findOne({ email });
+        const email = normalizeEmail(req.body.email);
+        const { otp } = req.body;
+        if (!email) {
+            return res.status(400).json({ message: 'Invalid email' });
+        }
+        const user = await User.findOne({ email: buildEmailRegex(email) });
 
         if (!user) {
             return res.status(400).json({ message: 'Người dùng không tồn tại' });
@@ -102,14 +124,19 @@ exports.verifyOTP = async (req, res) => {
 
 exports.login = async (req, res) => {
     try {
-        const identifier = (req.body.email || req.body.phone || '').trim();
+        const lookup = buildLoginLookup(req.body.identifier || req.body.email || req.body.phone || '');
         const { password } = req.body;
-        const user = await User.findOne({
-            $or: [
-                { email: identifier.toLowerCase() },
-                { phone: identifier }
-            ]
-        });
+        const query = [];
+
+        if (lookup?.emailRegex) {
+            query.push({ email: lookup.emailRegex });
+        }
+
+        if (lookup?.phoneVariants?.length) {
+            query.push({ phone: { $in: lookup.phoneVariants } });
+        }
+
+        const user = query.length ? await User.findOne({ $or: query }) : null;
 
         if (!user) {
             return res.status(400).json({ message: 'Sai email hoặc mật khẩu' });
@@ -138,6 +165,10 @@ exports.login = async (req, res) => {
         return res.json({
             message: 'Login successful',
             token,
+            status: user.status,
+            activationRequired: user.status === 'INACTIVE'
+                || user.status === 'PENDING_ACTIVATION'
+                || !!user.isFirstLogin,
             user: {
                 id: user._id,
                 fullName: user.fullName,
@@ -145,6 +176,7 @@ exports.login = async (req, res) => {
                 phone: user.phone,
                 role: user.role,
                 avatar: normalizeAvatarPath(user.avatar),
+                status: user.status,
                 isFirstLogin: !!user.isFirstLogin
             }
         });
@@ -156,8 +188,11 @@ exports.login = async (req, res) => {
 
 exports.forgotPassword = async (req, res) => {
     try {
-        const email = (req.body.email || '').trim().toLowerCase();
-        const user = await User.findOne({ email });
+        const email = normalizeEmail(req.body.email);
+        if (!email) {
+            return res.status(400).json({ message: 'Invalid email' });
+        }
+        const user = await User.findOne({ email: buildEmailRegex(email) });
 
         if (!user) {
             return res.status(400).json({ message: 'Email không tồn tại' });
@@ -179,9 +214,12 @@ exports.forgotPassword = async (req, res) => {
 
 exports.resetPassword = async (req, res) => {
     try {
-        const email = (req.body.email || '').trim().toLowerCase();
+        const email = normalizeEmail(req.body.email);
         const { otp, newPassword } = req.body;
-        const user = await User.findOne({ email });
+        if (!email) {
+            return res.status(400).json({ message: 'Invalid email' });
+        }
+        const user = await User.findOne({ email: buildEmailRegex(email) });
 
         if (!user || user.otp_code !== otp || user.otp_expires < Date.now()) {
             return res.status(400).json({ message: 'Mã OTP không hợp lệ hoặc đã hết hạn' });
